@@ -1,0 +1,31 @@
+# Sidebar rows for herdr-model-badge — copy into ~/.config/herdr/config.toml,
+# then run `herdr server reload-config`.
+#
+# The plugin reports its values as pane metadata tokens; herdr decides where they
+# go. Nothing appears until one of these rows references a `$token`.
+
+# Recommended: add a badge row to the agents we can actually read, and leave every
+# other agent's rows alone. `$badge` is "<model> · <effort>", e.g. "opus 5 · high".
+[ui.sidebar.agents.rows_by_agent]
+claude = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
+codex = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
+agy = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
+
+# Alternative: one rule for every agent. Simpler, but an agent this plugin cannot
+# read (cursor, droid, copilot, ...) then carries an empty third row.
+# [ui.sidebar.agents]
+# rows = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
+
+# Replace the "claude" line rather than adding a row, if you would rather keep
+# every agent at two rows:
+# [ui.sidebar.agents.rows_by_agent]
+# claude = [["state_icon", "workspace", "tab"], [{ token = "$badge", dim = true }]]
+
+# The parts are reported separately too, so compose them however you like. This
+# puts the model beside the agent name and the context size on its own row:
+# [ui.sidebar.agents.rows_by_agent]
+# claude = [
+#   ["state_icon", "workspace", "tab"],
+#   ["agent", { token = "$model", fg = "#89b4fa" }],
+#   [{ token = "$effort", dim = true }, { token = "$perm", dim = true }, { token = "$ctx", dim = true }],
+# ]

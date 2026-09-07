@@ -1,0 +1,56 @@
+# herdr-plugin.toml — manifest for herdr-model-badge.
+#
+# The plugin answers one question the agents sidebar cannot: which model and
+# reasoning effort is each agent actually running? It reads that from the agent's
+# own session log and reports it back to herdr as pane metadata tokens, which the
+# sidebar renders through `$badge` / `$model` / `$effort` (see config.example.toml).
+#
+# Everything here is one-shot by design. herdr documents startup hooks as
+# initialization commands rather than supervised daemons, so there is no background
+# process: the event hooks do the work as agents change state, and the startup hook
+# only fills in the agents that already existed when the session was restored.
+
+id = "herdr-model-badge"
+name = "herdr-model-badge"
+version = "0.1.0"
+description = "Show each agent's model and reasoning effort in the herdr agents sidebar."
+min_herdr_version = "0.8.0"
+# Native Windows is untested and its agent home paths differ; WSL works as Linux.
+platforms = ["linux", "macos"]
+
+# Install-time check only: no compilation, no downloads, no network. It fails the
+# install early with a clear message if python3 is missing, instead of letting every
+# hook fail silently later.
+[[build]]
+command = ["/bin/sh", "scripts/check-deps.sh"]
+
+# Fill in the agents that already existed when herdr restored the session. Without
+# this, a restored pane would show no badge until its next state change.
+[[startup]]
+command = ["python3", "-m", "herdr_model_badge", "sweep"]
+
+# The badge is only ever wrong just after an agent's turn boundary — a new turn is
+# what records a new model or effort — so agent state changes are exactly the right
+# trigger, and there is nothing to poll for in between.
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "-m", "herdr_model_badge", "event"]
+
+# A pane gaining or losing an agent: badge the new occupant, clear the old one's.
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "-m", "herdr_model_badge", "event"]
+
+[[actions]]
+id = "refresh-badges"
+title = "Refresh agent model badges"
+description = "Re-read every agent's session log and update its model/effort badge."
+contexts = ["global"]
+command = ["python3", "-m", "herdr_model_badge", "sweep", "--notify"]
+
+[[actions]]
+id = "clear-badges"
+title = "Clear agent model badges"
+description = "Remove every token this plugin owns. Run before uninstalling."
+contexts = ["global"]
+command = ["python3", "-m", "herdr_model_badge", "clear", "--notify"]
