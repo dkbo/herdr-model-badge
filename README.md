@@ -7,14 +7,14 @@ context, and how close is the account to its rate limits?**
 ```
   ○ panova              ○ panova
       claude                claude
-                  ->        fable 5.1 · high  21%
-                            5h:6% (→02:10)
-                            wk:4% (→09-14)
+                  ->        fable 5.1 · high · 21%
+                            5h:6% · →02:10
+                            wk:4% · →09-14
   ○ collect             ○ collect
       claude                claude
-                            opus 5 · high  6%
-                            5h:6% (→02:10)
-                            wk:4% (→09-14)
+                            opus 5 · high · 6%
+                            5h:6% · →02:10
+                            wk:4% · →09-14
 ```
 
 Every agent already records this in its own session log or hands it to its
@@ -34,25 +34,20 @@ Then tell the sidebar where to put the values, in `~/.config/herdr/config.toml`:
 [ui.sidebar.agents.rows_by_agent]
 claude = [
   ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-  [{ token = "$usage_session", dim = true }],
-  [{ token = "$usage_period", dim = true }],
+  [{ token = "agent", dim = true }],
+  [
+    { token = "$model", fg = "#cdd6f4", bold = true },
+    { token = "$effort", dim = true },
+    { token = "$ctx", fg = "#89b4fa" },
+  ],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
 ]
-codex = [
-  ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-  [{ token = "$usage_session", dim = true }],
-  [{ token = "$usage_period", dim = true }],
-]
-# Antigravity exposes no usage windows, so its rows stop at the badge.
-agy = [
-  ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-]
+# codex takes the same rows; agy has no usage windows, so its rows stop at the model.
 ```
+
+The full set, plus narrower and monochrome variants, is in
+[`config.example.toml`](config.example.toml).
 
 ```bash
 herdr server reload-config
@@ -62,8 +57,7 @@ Values appear as each agent next changes state, or immediately with
 `herdr plugin action invoke refresh-badges --plugin herdr-model-badge`.
 
 Give each agent only the rows it can fill — a row whose tokens are all empty is
-still a row. `config.example.toml` has narrower layouts, a single rule for every
-agent, and how to compose the tokens yourself.
+still a row.
 
 Requires herdr 0.8.0+ and `python3` 3.8+ on `PATH`. No third-party packages.
 
@@ -111,8 +105,24 @@ command still runs.
 | `$perm` | `auto` | permission / approval mode in force |
 | `$ctx` | `21%` | context used; falls back to a count (`147k`) when no percentage is available |
 | `$usage_session` | `5h:6% (→02:10)` | the short rate-limit window (≤ 24h) |
+| `$usage_session_pct` | `5h:6%` | just the number, for a row that colours it |
+| `$usage_session_at` | `→02:10` | just the reset, for a row that keeps it quiet |
 | `$usage_period` | `wk:4% (→09-14)` | the long rate-limit window (> 24h) |
+| `$usage_period_pct` | `wk:4%` | |
+| `$usage_period_at` | `→09-14` | |
 | `$usage` | `5h:6%  wk:4%` | both windows on one narrow row, percentages only |
+
+### Laying them out
+
+herdr joins the tokens in a row with `" · "`, so separators come free and should
+not be baked into a value. It styles a token as a whole, which is why every
+composite value is also reported pre-split: spend one token on
+`5h:6% (→02:10)`, or two on a coloured percentage beside a dim reset time.
+
+That whole-token styling is static, so the plugin cannot turn a percentage red as
+it climbs. The statusline it wraps still does — this is a sidebar at 26 columns,
+not a status bar, and one calm colour per kind of number reads better there than
+four that change under you.
 
 Window labels come from each provider's own window length, so a 5-hour, weekly or
 30-day plan all read correctly (`5h`, `wk`, `30d`) without the plugin knowing
@@ -130,7 +140,7 @@ stops being readable is cleared rather than left showing a stale value.
 
 ## Supported agents
 
-| agent | source | model | effort | `$perm` | `$ctx` | `$usage*` |
+| agent | source | model | effort | `$perm` | `$ctx` | `$usage_*` |
 |---|---|---|---|---|---|---|
 | `claude` | transcript, plus the statusLine payload | ✅ | ✅ | ✅ | `21%` with statusline, else `147k` | statusline only |
 | `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | ✅ | ✅ | ✅ | `17k` | ✅ built in |

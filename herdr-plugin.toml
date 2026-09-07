@@ -14,7 +14,7 @@
 
 id = "herdr-model-badge"
 name = "herdr-model-badge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Show each agent's model, effort, context use and rate-limit windows in the herdr agents sidebar."
 min_herdr_version = "0.8.0"
 # Native Windows is untested and its agent home paths differ; WSL works as Linux.

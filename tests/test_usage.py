@@ -56,40 +56,49 @@ class ResetLabelTests(unittest.TestCase):
 
 
 class SegmentTests(unittest.TestCase):
+    """A window splits into a percentage and a reset so each can be styled apart."""
+
     def test_a_full_segment_reads_like_the_statusline(self):
         got = usage.segment(300, 6, at("2026-09-08 04:29"), NOW)
-        self.assertEqual(got, "5h:6% (→04:29)")
+        self.assertEqual(got, ("5h:6%", "→04:29"))
 
     def test_a_period_segment_shows_a_date(self):
         got = usage.segment(10080, 4, at("2026-09-13 23:59"), NOW)
-        self.assertEqual(got, "wk:4% (→09-13)")
+        self.assertEqual(got, ("wk:4%", "→09-13"))
 
     def test_a_float_percentage_is_rounded(self):
         self.assertEqual(usage.segment(43200, 0.0, at("2026-10-05 23:23"), NOW),
-                         "30d:0% (→10-05)")
+                         ("30d:0%", "→10-05"))
         self.assertEqual(usage.segment(300, 6.7, at("2026-09-08 04:29"), NOW),
-                         "5h:7% (→04:29)")
+                         ("5h:7%", "→04:29"))
 
     def test_an_unknown_reset_still_shows_the_percentage(self):
-        self.assertEqual(usage.segment(300, 6, None, NOW), "5h:6%")
+        self.assertEqual(usage.segment(300, 6, None, NOW), ("5h:6%", None))
 
     def test_a_rolled_over_window_is_dropped_entirely(self):
-        self.assertIsNone(usage.segment(300, 6, at("2026-09-07 07:29"), NOW))
+        self.assertEqual(usage.segment(300, 6, at("2026-09-07 07:29"), NOW), (None, None))
 
     def test_a_missing_percentage_drops_the_segment(self):
-        self.assertIsNone(usage.segment(300, None, at("2026-09-08 04:29"), NOW))
+        self.assertEqual(usage.segment(300, None, at("2026-09-08 04:29"), NOW),
+                         (None, None))
 
     def test_an_unknown_window_drops_the_segment(self):
-        self.assertIsNone(usage.segment(None, 6, at("2026-09-08 04:29"), NOW))
+        self.assertEqual(usage.segment(None, 6, at("2026-09-08 04:29"), NOW),
+                         (None, None))
+
+    def test_joined_puts_the_reset_back_in_parentheses(self):
+        self.assertEqual(usage.joined(("5h:6%", "→04:29")), "5h:6% (→04:29)")
+        self.assertEqual(usage.joined(("5h:6%", None)), "5h:6%")
+        self.assertIsNone(usage.joined((None, None)))
 
 
 class CompactTests(unittest.TestCase):
     def test_both_windows_join_into_one_narrow_row(self):
-        got = usage.compact(["5h:6% (→04:29)", "wk:4% (→09-13)"])
+        got = usage.compact(["5h:6%", "wk:4%"])
         self.assertEqual(got, "5h:6%  wk:4%")
 
     def test_one_window_is_left_as_its_percentage(self):
-        self.assertEqual(usage.compact(["30d:0% (→10-05)"]), "30d:0%")
+        self.assertEqual(usage.compact(["30d:0%"]), "30d:0%")
 
     def test_nothing_readable_is_unknown(self):
         self.assertIsNone(usage.compact([]))
@@ -110,6 +119,24 @@ class WindowsTests(unittest.TestCase):
         self.assertEqual(got["usage_session"], "5h:6% (→04:29)")
         self.assertEqual(got["usage_period"], "wk:4% (→09-13)")
         self.assertEqual(got["usage"], "5h:6%  wk:4%")
+
+    def test_each_window_also_arrives_split_for_separate_styling(self):
+        got = usage.tokens(
+            [
+                {"minutes": 300, "percent": 6, "resets_at": at("2026-09-08 04:29")},
+                {"minutes": 10080, "percent": 4, "resets_at": at("2026-09-13 23:59")},
+            ],
+            now=NOW,
+        )
+        self.assertEqual(got["usage_session_pct"], "5h:6%")
+        self.assertEqual(got["usage_session_at"], "→04:29")
+        self.assertEqual(got["usage_period_pct"], "wk:4%")
+        self.assertEqual(got["usage_period_at"], "→09-13")
+
+    def test_a_window_with_no_known_reset_yields_no_at_token(self):
+        got = usage.tokens([{"minutes": 300, "percent": 6}], now=NOW)
+        self.assertEqual(got["usage_session_pct"], "5h:6%")
+        self.assertNotIn("usage_session_at", got)
 
     def test_a_period_only_plan_leaves_the_session_token_out(self):
         got = usage.tokens(

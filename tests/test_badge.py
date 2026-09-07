@@ -4,8 +4,9 @@ import unittest
 
 from herdr_model_badge import badge
 
-TOKEN_NAMES = ("badge", "model", "effort", "perm", "ctx",
-               "usage", "usage_session", "usage_period")
+TOKEN_NAMES = ("badge", "model", "effort", "perm", "ctx", "usage",
+               "usage_session", "usage_session_pct", "usage_session_at",
+               "usage_period", "usage_period_pct", "usage_period_at")
 
 
 class NoCache:
@@ -191,3 +192,15 @@ class StatuslineOverlayTests(unittest.TestCase):
         )
         self.assertEqual(got["ctx"], "17k")
         self.assertIsNone(got["usage"])
+
+
+class TokenBudgetTests(unittest.TestCase):
+    def test_the_token_set_fits_what_one_report_can_carry(self):
+        # pane.report_metadata caps tokens at 16 per call.
+        self.assertLessEqual(len(badge.TOKEN_NAMES), 16)
+
+    def test_token_names_are_valid_herdr_identifiers(self):
+        import re
+
+        for name in badge.TOKEN_NAMES:
+            self.assertRegex(name, r"^[A-Za-z0-9_-]{1,32}$")

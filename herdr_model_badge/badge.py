@@ -4,6 +4,9 @@ from . import fmt, providers, statusline
 
 #: Every token we own. All of them go on every report so that a value which stops
 #: being readable clears instead of lingering as a stale badge.
+#: herdr accepts at most 16 tokens per report, and styles each one as a whole, so
+#: the composite values are reported alongside their parts: a row can spend one
+#: token on "5h:6% (→04:29)" or two on a coloured percentage and a quiet reset.
 TOKEN_NAMES = (
     "badge",
     "model",
@@ -12,7 +15,11 @@ TOKEN_NAMES = (
     "ctx",
     "usage",
     "usage_session",
+    "usage_session_pct",
+    "usage_session_at",
     "usage_period",
+    "usage_period_pct",
+    "usage_period_at",
 )
 
 

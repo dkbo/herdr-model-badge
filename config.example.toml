@@ -2,61 +2,101 @@
 # then run `herdr server reload-config`.
 #
 # The plugin reports its values as pane metadata tokens; herdr decides where they
-# go. Nothing appears until one of these rows references a `$token`.
+# go and how they look. Nothing appears until a row references a `$token`.
+#
+# Two things shape every layout below:
+#
+#   * herdr joins the tokens in a row with " · ", so you get separators for free
+#     and should not bake them into a value.
+#   * herdr styles a token as a whole. That is why each value is reported both
+#     whole and pre-split: spend one token on "5h:6% (→04:29)", or two on a
+#     coloured percentage and a quiet reset time.
 #
 # Give each agent only the rows it can fill: a row whose tokens are all empty is
 # still a row. Antigravity has no usage windows, and a Claude account billed
-# through the API or console reports no rate limits either — drop the two usage
-# rows for those.
+# through the API or console reports no rate limits either.
+#
+# Colours below are Catppuccin Mocha, which matches herdr's default theme. An
+# inline style takes a strict #RGB/#RRGGBB `fg` plus `bold` and `dim`; omitted
+# fields keep herdr's contextual default, so a row stays readable when selected.
 
 [ui.sidebar.agents.rows_by_agent]
 
 #   ○ herdrp
 #       claude
-#       opus 5 · high  21%
-#       5h:6% (→02:10)
-#       wk:4% (→09-14)
+#       opus 5 · high · 21%          bold model, quiet effort, blue context
+#       5h:6% · →02:10               green number, quiet reset
+#       wk:4% · →09-14
 claude = [
   ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-  [{ token = "$usage_session", dim = true }],
-  [{ token = "$usage_period", dim = true }],
+  [{ token = "agent", dim = true }],
+  [
+    { token = "$model", fg = "#cdd6f4", bold = true },
+    { token = "$effort", dim = true },
+    { token = "$ctx", fg = "#89b4fa" },
+  ],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
 ]
 
 #   ○ my-service
 #       codex
-#       gpt 5.5 · medium  17k
-#       30d:0% (→10-05)
+#       gpt 5.5 · medium · 17k
+#       30d:0% · →10-05
 codex = [
   ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-  [{ token = "$usage_session", dim = true }],
-  [{ token = "$usage_period", dim = true }],
+  [{ token = "agent", dim = true }],
+  [
+    { token = "$model", fg = "#cdd6f4", bold = true },
+    { token = "$effort", dim = true },
+    { token = "$ctx", fg = "#89b4fa" },
+  ],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
 ]
 
-# Antigravity exposes no usage windows, so its rows stop at the badge.
+# Antigravity exposes no usage windows, so its rows stop at the model.
 agy = [
   ["state_icon", "workspace", "tab"],
-  ["agent"],
-  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+  [{ token = "agent", dim = true }],
+  [
+    { token = "$model", fg = "#cdd6f4", bold = true },
+    { token = "$effort", dim = true },
+    { token = "$ctx", fg = "#89b4fa" },
+  ],
 ]
 
 # --- narrower alternatives -------------------------------------------------
 
 # Both windows on one row, percentages only. Fits a 20-column sidebar.
-#   opus 5 · high  21%
+#   opus 5 · high · 21%
 #   5h:6%  wk:4%
 # claude = [
 #   ["state_icon", "workspace", "tab"],
-#   ["agent"],
-#   [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
-#   [{ token = "$usage", dim = true }],
+#   [{ token = "agent", dim = true }],
+#   [
+#     { token = "$model", fg = "#cdd6f4", bold = true },
+#     { token = "$effort", dim = true },
+#     { token = "$ctx", fg = "#89b4fa" },
+#   ],
+#   [{ token = "$usage", fg = "#a6e3a1" }],
 # ]
 
-# Model and effort only, replacing the agent line rather than adding rows.
-# claude = [["state_icon", "workspace", "tab"], [{ token = "$badge", dim = true }]]
+# Drop the agent row: the model already says which agent this is.
+#   ○ herdrp
+#   opus 5 · high · 21%
+# claude = [
+#   ["state_icon", "workspace", "tab"],
+#   [
+#     { token = "$model", fg = "#cdd6f4", bold = true },
+#     { token = "$effort", dim = true },
+#     { token = "$ctx", fg = "#89b4fa" },
+#   ],
+# ]
+
+# One token per window, reset time included, no separate styling.
+#   5h:6% (→02:10)
+# [{ token = "$usage_session", dim = true }]
 
 # --- one rule for every agent ----------------------------------------------
 
@@ -65,18 +105,21 @@ agy = [
 # [ui.sidebar.agents]
 # rows = [
 #   ["state_icon", "workspace", "tab"],
-#   ["agent"],
-#   [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+#   [{ token = "agent", dim = true }],
+#   [
+#     { token = "$model", fg = "#cdd6f4", bold = true },
+#     { token = "$effort", dim = true },
+#     { token = "$ctx", fg = "#89b4fa" },
+#   ],
 # ]
 
-# --- composing the parts yourself ------------------------------------------
+# --- other palettes ---------------------------------------------------------
 
-# The tokens are reported separately, so arrange them however you like.
-# Inline styles take a strict #RGB/#RRGGBB `fg`, plus `bold` and `dim`.
-# [ui.sidebar.agents.rows_by_agent]
-# claude = [
-#   ["state_icon", "workspace", "tab"],
-#   ["agent", { token = "$model", fg = "#89b4fa" }],
-#   [{ token = "$effort", dim = true }, { token = "$perm", dim = true }],
-#   [{ token = "$ctx", dim = true }, { token = "$usage", dim = true }],
-# ]
+# Cooler, closer to a Claude Code statusline: cyan context, teal usage.
+#   { token = "$ctx", fg = "#89dceb" }
+#   { token = "$usage_session_pct", fg = "#94e2d5" }
+#
+# Monochrome, if colour in the sidebar is not for you: keep the model bold and
+# let everything else sit dim.
+#   { token = "$model", bold = true }
+#   { token = "$ctx", dim = true }

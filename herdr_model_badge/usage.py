@@ -66,21 +66,34 @@ def _percent(value):
 
 
 def segment(minutes, percent, resets_at, now=None):
-    """One window as the sidebar shows it: ``5h:6% (→04:29)``."""
+    """One window, split into ``("5h:6%", "→04:29")``.
+
+    The two halves are reported as separate tokens because herdr styles a sidebar
+    token as a whole: keeping them apart is what lets the number carry a colour
+    while the reset time stays quiet.
+    """
     label = window_label(minutes)
     pct = _percent(percent)
     if label is None or pct is None:
-        return None
-    if resets_at is not None and reset_label(resets_at, now) is None:
-        # A passed reset means this reading belongs to a window that no longer exists.
-        return None
+        return None, None
     reset = reset_label(resets_at, now)
-    return "%s:%d%% (%s)" % (label, pct, reset) if reset else "%s:%d%%" % (label, pct)
+    if resets_at is not None and reset is None:
+        # A passed reset means this reading belongs to a window that no longer exists.
+        return None, None
+    return "%s:%d%%" % (label, pct), reset
 
 
-def compact(segments):
+def joined(parts):
+    """The two halves back as one value: ``5h:6% (→04:29)``."""
+    pct, reset = parts
+    if pct is None:
+        return None
+    return "%s (%s)" % (pct, reset) if reset else pct
+
+
+def compact(percentages):
     """The one-row form: percentages only, so two windows fit a narrow sidebar."""
-    parts = [text.split(" (")[0] for text in segments if text]
+    parts = [text for text in percentages if text]
     return "  ".join(parts) if parts else None
 
 
@@ -94,16 +107,21 @@ def tokens(windows, now=None):
     best = {}
     for window in windows:
         minutes = _minutes(window.get("minutes"))
-        text = segment(minutes, window.get("percent"), window.get("resets_at"), now)
-        if text is None:
+        parts = segment(minutes, window.get("percent"), window.get("resets_at"), now)
+        if parts[0] is None:
             continue
         slot = classify(minutes)
         if slot not in best or minutes > best[slot][0]:
-            best[slot] = (minutes, text)
+            best[slot] = (minutes, parts)
 
-    values = {"usage_%s" % slot: text for slot, (_, text) in best.items()}
-    ordered = [best[slot][1] for slot in ("session", "period") if slot in best]
-    combined = compact(ordered)
+    values = {}
+    for slot, (_, (pct, reset)) in best.items():
+        values["usage_%s" % slot] = joined((pct, reset))
+        values["usage_%s_pct" % slot] = pct
+        if reset:
+            values["usage_%s_at" % slot] = reset
+
+    combined = compact([best[slot][1][0] for slot in ("session", "period") if slot in best])
     if combined:
         values["usage"] = combined
     return values
