@@ -1,9 +1,11 @@
 # herdr-plugin.toml — manifest for herdr-model-badge.
 #
-# The plugin answers one question the agents sidebar cannot: which model and
-# reasoning effort is each agent actually running? It reads that from the agent's
-# own session log and reports it back to herdr as pane metadata tokens, which the
-# sidebar renders through `$badge` / `$model` / `$effort` (see config.example.toml).
+# The plugin answers what the agents sidebar cannot: which model each agent runs, at
+# what effort, how full its context is, and how close the account is to its rate
+# limits. It reads that from each agent's own session log — plus, for Claude Code,
+# the statusLine payload that carries what the transcript never records — and
+# reports it back to herdr as pane metadata tokens, which the sidebar renders
+# through `$badge` / `$ctx` / `$usage*` (see config.example.toml).
 #
 # Everything here is one-shot by design. herdr documents startup hooks as
 # initialization commands rather than supervised daemons, so there is no background
@@ -12,8 +14,8 @@
 
 id = "herdr-model-badge"
 name = "herdr-model-badge"
-version = "0.1.0"
-description = "Show each agent's model and reasoning effort in the herdr agents sidebar."
+version = "0.2.0"
+description = "Show each agent's model, effort, context use and rate-limit windows in the herdr agents sidebar."
 min_herdr_version = "0.8.0"
 # Native Windows is untested and its agent home paths differ; WSL works as Linux.
 platforms = ["linux", "macos"]
@@ -24,8 +26,10 @@ platforms = ["linux", "macos"]
 [[build]]
 command = ["/bin/sh", "scripts/check-deps.sh"]
 
-# Fill in the agents that already existed when herdr restored the session. Without
-# this, a restored pane would show no badge until its next state change.
+# Fill in the agents that already existed when herdr restored the session, and
+# rewrite the statusline launcher so it points at this plugin root even after an
+# update moved it. Without this, a restored pane would show no badge until its next
+# state change.
 [[startup]]
 command = ["python3", "-m", "herdr_model_badge", "sweep"]
 
@@ -44,7 +48,7 @@ command = ["python3", "-m", "herdr_model_badge", "event"]
 [[actions]]
 id = "refresh-badges"
 title = "Refresh agent model badges"
-description = "Re-read every agent's session log and update its model/effort badge."
+description = "Re-read every agent's session log, refresh its badge, and rewrite the statusline launcher."
 contexts = ["global"]
 command = ["python3", "-m", "herdr_model_badge", "sweep", "--notify"]
 

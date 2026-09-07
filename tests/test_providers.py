@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 
 from herdr_model_badge import providers
@@ -154,6 +155,9 @@ class ClaudeProviderTests(TempHome):
         self.assertEqual(got["perm"], "plan")
 
 
+CODEX_RESET_SESSION = time.time() + 3600
+CODEX_RESET_PERIOD = time.time() + 6 * 86400
+
 CODEX_TURN_CONTEXT = {
     "type": "turn_context",
     "payload": {
@@ -167,6 +171,21 @@ CODEX_TOKEN_COUNT = {
     "payload": {
         "type": "token_count",
         "info": {"last_token_usage": {"input_tokens": 16870}},
+        # Codex records its own rate-limit windows here, so unlike Claude Code it
+        # needs no statusline wiring to report usage.
+        "rate_limits": {
+            "primary": {
+                "used_percent": 6.0,
+                "window_minutes": 300,
+                "resets_at": CODEX_RESET_SESSION,
+            },
+            "secondary": {
+                "used_percent": 4.0,
+                "window_minutes": 10080,
+                "resets_at": CODEX_RESET_PERIOD,
+            },
+            "plan_type": "plus",
+        },
     },
 }
 
@@ -189,6 +208,34 @@ class CodexProviderTests(TempHome):
         self.rollout([older, CODEX_TURN_CONTEXT])
         got = codex.read({"session_id": "01a0-abcd"}, home=self.home)
         self.assertEqual(got["model"], "gpt 5.5")
+
+    def test_both_rate_limit_windows_become_usage_tokens(self):
+        self.rollout([CODEX_TURN_CONTEXT, CODEX_TOKEN_COUNT])
+        got = codex.read({"session_id": "01a0-abcd"}, home=self.home)
+        self.assertTrue(got["usage_session"].startswith("5h:6% (→"))
+        self.assertTrue(got["usage_period"].startswith("wk:4% (→"))
+        self.assertEqual(got["usage"], "5h:6%  wk:4%")
+
+    def test_a_free_plan_with_only_a_long_window_reports_just_that_one(self):
+        payload = json.loads(json.dumps(CODEX_TOKEN_COUNT))
+        payload["payload"]["rate_limits"] = {
+            "primary": {"used_percent": 0.0, "window_minutes": 43200,
+                        "resets_at": CODEX_RESET_PERIOD},
+            "secondary": None,
+            "plan_type": "free",
+        }
+        self.rollout([CODEX_TURN_CONTEXT, payload])
+        got = codex.read({"session_id": "01a0-abcd"}, home=self.home)
+        self.assertNotIn("usage_session", got)
+        self.assertTrue(got["usage_period"].startswith("30d:0% (→"))
+
+    def test_a_rollout_without_rate_limits_reports_no_usage(self):
+        payload = json.loads(json.dumps(CODEX_TOKEN_COUNT))
+        payload["payload"].pop("rate_limits")
+        self.rollout([CODEX_TURN_CONTEXT, payload])
+        got = codex.read({"session_id": "01a0-abcd"}, home=self.home)
+        self.assertEqual(got["ctx"], "17k")
+        self.assertNotIn("usage", got)
 
     def test_a_rollout_without_usage_still_reports_the_model(self):
         self.rollout([CODEX_TURN_CONTEXT])

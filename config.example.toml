@@ -3,29 +3,80 @@
 #
 # The plugin reports its values as pane metadata tokens; herdr decides where they
 # go. Nothing appears until one of these rows references a `$token`.
+#
+# Give each agent only the rows it can fill: a row whose tokens are all empty is
+# still a row. Antigravity has no usage windows, and a Claude account billed
+# through the API or console reports no rate limits either — drop the two usage
+# rows for those.
 
-# Recommended: add a badge row to the agents we can actually read, and leave every
-# other agent's rows alone. `$badge` is "<model> · <effort>", e.g. "opus 5 · high".
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
-codex = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
-agy = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
 
-# Alternative: one rule for every agent. Simpler, but an agent this plugin cannot
-# read (cursor, droid, copilot, ...) then carries an empty third row.
-# [ui.sidebar.agents]
-# rows = [["state_icon", "workspace", "tab"], ["agent"], [{ token = "$badge", dim = true }]]
+#   ○ herdrp
+#       claude
+#       opus 5 · high  21%
+#       5h:6% (→02:10)
+#       wk:4% (→09-14)
+claude = [
+  ["state_icon", "workspace", "tab"],
+  ["agent"],
+  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+  [{ token = "$usage_session", dim = true }],
+  [{ token = "$usage_period", dim = true }],
+]
 
-# Replace the "claude" line rather than adding a row, if you would rather keep
-# every agent at two rows:
-# [ui.sidebar.agents.rows_by_agent]
+#   ○ my-service
+#       codex
+#       gpt 5.5 · medium  17k
+#       30d:0% (→10-05)
+codex = [
+  ["state_icon", "workspace", "tab"],
+  ["agent"],
+  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+  [{ token = "$usage_session", dim = true }],
+  [{ token = "$usage_period", dim = true }],
+]
+
+# Antigravity exposes no usage windows, so its rows stop at the badge.
+agy = [
+  ["state_icon", "workspace", "tab"],
+  ["agent"],
+  [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+]
+
+# --- narrower alternatives -------------------------------------------------
+
+# Both windows on one row, percentages only. Fits a 20-column sidebar.
+#   opus 5 · high  21%
+#   5h:6%  wk:4%
+# claude = [
+#   ["state_icon", "workspace", "tab"],
+#   ["agent"],
+#   [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+#   [{ token = "$usage", dim = true }],
+# ]
+
+# Model and effort only, replacing the agent line rather than adding rows.
 # claude = [["state_icon", "workspace", "tab"], [{ token = "$badge", dim = true }]]
 
-# The parts are reported separately too, so compose them however you like. This
-# puts the model beside the agent name and the context size on its own row:
+# --- one rule for every agent ----------------------------------------------
+
+# Simpler, but an agent this plugin cannot read (cursor, droid, copilot, ...)
+# then carries empty rows.
+# [ui.sidebar.agents]
+# rows = [
+#   ["state_icon", "workspace", "tab"],
+#   ["agent"],
+#   [{ token = "$badge", dim = true }, { token = "$ctx", dim = true }],
+# ]
+
+# --- composing the parts yourself ------------------------------------------
+
+# The tokens are reported separately, so arrange them however you like.
+# Inline styles take a strict #RGB/#RRGGBB `fg`, plus `bold` and `dim`.
 # [ui.sidebar.agents.rows_by_agent]
 # claude = [
 #   ["state_icon", "workspace", "tab"],
 #   ["agent", { token = "$model", fg = "#89b4fa" }],
-#   [{ token = "$effort", dim = true }, { token = "$perm", dim = true }, { token = "$ctx", dim = true }],
+#   [{ token = "$effort", dim = true }, { token = "$perm", dim = true }],
+#   [{ token = "$ctx", dim = true }, { token = "$usage", dim = true }],
 # ]

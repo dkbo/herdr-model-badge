@@ -2,7 +2,7 @@
 
 import os
 
-from .. import discover, fmt, tail
+from .. import discover, fmt, tail, usage
 
 AGENTS = ("codex",)
 
@@ -48,6 +48,24 @@ def _context_tokens(record):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _usage_windows(record):
+    """Codex names each window's length, so the labels come from the data."""
+    limits = (record.get("payload") or {}).get("rate_limits") or {}
+    windows = []
+    for slot in ("primary", "secondary"):
+        window = limits.get(slot)
+        if not isinstance(window, dict):
+            continue
+        windows.append(
+            {
+                "minutes": window.get("window_minutes"),
+                "percent": window.get("used_percent"),
+                "resets_at": window.get("resets_at"),
+            }
+        )
+    return windows
+
+
 def read(session, home=None):
     home = home or default_home()
     path = session.get("session_path") or find_rollout(
@@ -65,7 +83,8 @@ def read(session, home=None):
         values["model"] = fmt.generic_model(payload.get("model"))
         values["effort"] = fmt.effort(payload.get("effort"))
         values["perm"] = fmt.permission(payload.get("approval_policy"))
-    usage = found.get("usage")
-    if usage is not None:
-        values["ctx"] = fmt.token_count(_context_tokens(usage))
+    counted = found.get("usage")
+    if counted is not None:
+        values["ctx"] = fmt.token_count(_context_tokens(counted))
+        values.update(usage.tokens(_usage_windows(counted)))
     return {name: value for name, value in values.items() if value is not None}
