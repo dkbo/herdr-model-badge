@@ -79,16 +79,13 @@ agy = [
   ],
 ]
 
-# --- colour by value (herdr 0.9.0+) ----------------------------------------
+# --- colour by value -------------------------------------------------------
 
 # `rules` restyle a token by its own value. A `gt` rule only matches a value that
 # parses completely as a number, so `5h:87%` never trips a threshold — style
 # `$usage_*_num` and `$ctx_num`, which are the same readings with the unit taken
 # off, and take the window label as its own token. The cost is the unit itself:
 # herdr's " · " separator is not configurable, so the row reads `5h · 87 · →17:20`.
-#
-# herdr 0.8.x rejects the whole agent entry rather than ignoring `rules`
-# ("keeping current ui settings"), so paste this only once you are on 0.9.0.
 #
 #   ○ herdrp
 #       claude

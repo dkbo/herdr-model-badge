@@ -50,7 +50,7 @@ claude = [
 # codex takes the same rows; agy has no usage windows, so its rows stop at the model.
 ```
 
-To turn a number red as it climbs, style the unitless token instead — herdr 0.9.0+:
+To turn a number red as it climbs, style the unitless token instead:
 
 ```toml
 [
@@ -64,8 +64,7 @@ To turn a number red as it climbs, style the unitless token instead — herdr 0.
 ```
 
 That row reads `5h · 87 · →17:20`: herdr's separator is not configurable, so a
-unitless number costs you the `%` and a `·`. herdr 0.8.x rejects the whole agent
-entry rather than ignoring `rules`, so keep the plain rows until you have 0.9.0.
+unitless number costs you the `%` and a `·`.
 
 Every token above says `dim = false` on purpose. Leaving `dim` out keeps herdr's
 contextual style, which can pull a colour back down on a row that is not focused;
@@ -84,7 +83,11 @@ Values appear as each agent next changes state, or immediately with
 Give each agent only the rows it can fill — a row whose tokens are all empty is
 still a row.
 
-Requires herdr 0.8.2+ and `python3` 3.8+ on `PATH`. No third-party packages.
+Requires herdr 0.9.0+ and `python3` 3.8+ on `PATH`. No third-party packages.
+
+The plugin's own work runs on 0.8.2. The floor is 0.9.0 because that is where the
+sidebar restyles a token by its value, and 0.8.x rejects a row carrying `rules`
+outright rather than ignoring it.
 
 ### One extra step for Claude Code
 

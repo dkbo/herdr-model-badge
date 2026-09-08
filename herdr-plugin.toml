@@ -20,9 +20,11 @@ id = "herdr-model-badge"
 name = "herdr-model-badge"
 version = "0.4.0"
 description = "Show each agent's model, effort, context use, spend and rate-limit windows in the herdr agents sidebar."
-# 0.8.2 is the version `ttl_ms` on pane.report_metadata was verified against, and
-# the usage tokens rely on it to expire on a pane that has gone quiet.
-min_herdr_version = "0.8.2"
+# The plugin itself runs on 0.8.2, which is where `ttl_ms` on pane.report_metadata
+# was verified. The floor is 0.9.0 because that is where sidebar `rules` restyle a
+# token by its value: 0.8.x does not ignore an unknown `rules` field, it rejects the
+# whole agent entry, so the rows this plugin documents would silently not load.
+min_herdr_version = "0.9.0"
 # Native Windows is untested and its agent home paths differ; WSL works as Linux.
 platforms = ["linux", "macos"]
 
