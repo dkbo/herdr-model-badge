@@ -14,29 +14,42 @@
 #
 # Give each agent only the rows it can fill: a row whose tokens are all empty is
 # still a row. Antigravity has no usage windows, and a Claude account billed
-# through the API or console reports no rate limits either.
+# through the API or console reports no rate limits either. `$cost` is Claude's
+# alone — no other agent records what a session cost, only how many tokens it used.
 #
-# Colours below are Catppuccin Mocha, which matches herdr's default theme. An
-# inline style takes a strict #RGB/#RRGGBB `fg` plus `bold` and `dim`; omitted
-# fields keep herdr's contextual default, so a row stays readable when selected.
+# The `$usage*` values expire: herdr drops them once the window they describe has
+# reset, or after 30 minutes with nothing to confirm them. The rows above then go
+# blank on a pane nobody is using, while the model beside them stays.
+#
+# Colours below follow what a Claude Code statusline does: every percentage in one
+# green, the model bold, and the labels and reset times quiet but not invisible.
+#
+# An inline style takes a strict #RGB/#RRGGBB `fg` plus `bold` and `dim`. Every
+# token here says `dim = false` rather than leaving `dim` out: an omitted field
+# keeps herdr's contextual style, which can pull a colour back down on a row that
+# is not focused, and an explicit `false` removes that modifier for good. Greys do
+# the quietening instead, which stays legible on a dark background where dim does
+# not.
 
 [ui.sidebar.agents.rows_by_agent]
 
 #   ○ herdrp
 #       claude
-#       opus 5 · high · 21%          bold model, quiet effort, blue context
+#       opus 5 · high · 21%          bold model, readable effort, green context
 #       5h:6% · →02:10               green number, quiet reset
 #       wk:4% · →09-14
+#       $1.23                        what this session has cost so far
 claude = [
   ["state_icon", "workspace", "tab"],
-  [{ token = "agent", dim = true }],
+  [{ token = "agent", fg = "#9399b2", dim = false }],
   [
-    { token = "$model", fg = "#cdd6f4", bold = true },
-    { token = "$effort", dim = true },
-    { token = "$ctx", fg = "#89b4fa" },
+    { token = "$model", fg = "#cdd6f4", bold = true, dim = false },
+    { token = "$effort", fg = "#bac2de", dim = false },
+    { token = "$ctx", fg = "#a6e3a1", dim = false },
   ],
-  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
-  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_session_at", fg = "#a6adc8", dim = false }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_period_at", fg = "#a6adc8", dim = false }],
+  [{ token = "$cost", fg = "#5fe1d6", dim = false }],
 ]
 
 #   ○ my-service
@@ -45,32 +58,88 @@ claude = [
 #       30d:0% · →10-05
 codex = [
   ["state_icon", "workspace", "tab"],
-  [{ token = "agent", dim = true }],
+  [{ token = "agent", fg = "#9399b2", dim = false }],
   [
-    { token = "$model", fg = "#cdd6f4", bold = true },
-    { token = "$effort", dim = true },
-    { token = "$ctx", fg = "#89b4fa" },
+    { token = "$model", fg = "#cdd6f4", bold = true, dim = false },
+    { token = "$effort", fg = "#bac2de", dim = false },
+    { token = "$ctx", fg = "#a6e3a1", dim = false },
   ],
-  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
-  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_session_at", fg = "#a6adc8", dim = false }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_period_at", fg = "#a6adc8", dim = false }],
 ]
 
 # Antigravity exposes no usage windows, so its rows stop at the model.
 agy = [
   ["state_icon", "workspace", "tab"],
-  [{ token = "agent", dim = true }],
+  [{ token = "agent", fg = "#9399b2", dim = false }],
   [
-    { token = "$model", fg = "#cdd6f4", bold = true },
-    { token = "$effort", dim = true },
-    { token = "$ctx", fg = "#89b4fa" },
+    { token = "$model", fg = "#cdd6f4", bold = true, dim = false },
+    { token = "$effort", fg = "#bac2de", dim = false },
+    { token = "$ctx", fg = "#a6e3a1", dim = false },
   ],
 ]
 
+# --- colour by value (herdr 0.9.0+) ----------------------------------------
+
+# `rules` restyle a token by its own value. A `gt` rule only matches a value that
+# parses completely as a number, so `5h:87%` never trips a threshold — style
+# `$usage_*_num` and `$ctx_num`, which are the same readings with the unit taken
+# off, and take the window label as its own token. The cost is the unit itself:
+# herdr's " · " separator is not configurable, so the row reads `5h · 87 · →17:20`.
+#
+# herdr 0.8.x rejects the whole agent entry rather than ignoring `rules`
+# ("keeping current ui settings"), so paste this only once you are on 0.9.0.
+#
+#   ○ herdrp
+#       claude
+#       opus 5 · high · 92          92 red and bold, 74 yellow, 21 green
+#       5h · 87 · →17:20
+#       wk · 41 · →09-14
+#       $7.46
+# claude = [
+#   ["state_icon", "workspace", "tab"],
+#   [{ token = "agent", fg = "#9399b2", dim = false }],
+#   [
+#     { token = "$model", fg = "#cdd6f4", bold = true, dim = false },
+#     { token = "$effort", fg = "#bac2de", dim = false },
+#     { token = "$ctx_num", fg = "#a6e3a1", dim = false, rules = [
+#       { gt = 80, fg = "#ff6188", bold = true },
+#       { gt = 70, fg = "#ffd75f" },
+#     ] },
+#   ],
+#   [
+#     { token = "$usage_session_label", fg = "#a6adc8", dim = false },
+#     { token = "$usage_session_num", fg = "#a6e3a1", dim = false, rules = [
+#       { gt = 80, fg = "#ff6188", bold = true },
+#       { gt = 70, fg = "#ffd75f" },
+#     ] },
+#     { token = "$usage_session_at", fg = "#a6adc8", dim = false },
+#   ],
+#   [
+#     { token = "$usage_period_label", fg = "#a6adc8", dim = false },
+#     { token = "$usage_period_num", fg = "#a6e3a1", dim = false, rules = [
+#       { gt = 80, fg = "#ff6188", bold = true },
+#       { gt = 70, fg = "#ffd75f" },
+#     ] },
+#     { token = "$usage_period_at", fg = "#a6adc8", dim = false },
+#   ],
+#   [{ token = "$cost", fg = "#5fe1d6", dim = false }],
+# ]
+#
+# `$ctx_num` is Claude's alone: Codex reports a context count, and a threshold
+# meant for a percentage would paint `84k` as though it were one. Give Codex the
+# same usage rows but keep `$ctx` on its model row.
+#
+# Thresholds are 70 and 80 above. A Claude Code statusline conventionally warns at
+# 70 and goes red at 90; `{ gt = 90 }` matches that instead. `gt` is strictly
+# greater, so `gt = 80` first turns red at 81.
+
 # --- narrower alternatives -------------------------------------------------
 
-# Both windows on one row, percentages only. Fits a 20-column sidebar.
+# Both windows on one row, percentages only, with the spend beside them. Fits a
+# 20-column sidebar.
 #   opus 5 · high · 21%
-#   5h:6%  wk:4%
+#   5h:6%  wk:4% · $1.23
 # claude = [
 #   ["state_icon", "workspace", "tab"],
 #   [{ token = "agent", dim = true }],
@@ -79,7 +148,7 @@ agy = [
 #     { token = "$effort", dim = true },
 #     { token = "$ctx", fg = "#89b4fa" },
 #   ],
-#   [{ token = "$usage", fg = "#a6e3a1" }],
+#   [{ token = "$usage", fg = "#a6e3a1" }, { token = "$cost", dim = true }],
 # ]
 
 # Drop the agent row: the model already says which agent this is.
@@ -115,11 +184,15 @@ agy = [
 
 # --- other palettes ---------------------------------------------------------
 
-# Cooler, closer to a Claude Code statusline: cyan context, teal usage.
-#   { token = "$ctx", fg = "#89dceb" }
-#   { token = "$usage_session_pct", fg = "#94e2d5" }
+# Cooler: cyan context, teal usage, if one green for every number is too flat.
+#   { token = "$ctx", fg = "#89dceb", dim = false }
+#   { token = "$usage_session_pct", fg = "#94e2d5", dim = false }
+#
+# Calmer warning colours, if the saturated pair above is too loud: Catppuccin's own
+#   { gt = 80, fg = "#f38ba8", bold = true }
+#   { gt = 70, fg = "#f9e2af" }
 #
 # Monochrome, if colour in the sidebar is not for you: keep the model bold and
-# let everything else sit dim.
-#   { token = "$model", bold = true }
-#   { token = "$ctx", dim = true }
+# let everything else sit quiet.
+#   { token = "$model", bold = true, dim = false }
+#   { token = "$ctx", fg = "#9399b2", dim = false }

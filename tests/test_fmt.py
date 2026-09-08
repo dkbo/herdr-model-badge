@@ -90,5 +90,27 @@ class BadgeTests(unittest.TestCase):
         self.assertIsNone(fmt.badge(None, None))
 
 
+class MoneyTests(unittest.TestCase):
+    """Session spend, narrow enough for a sidebar at any plausible number."""
+
+    def test_cents_matter_while_the_number_is_small(self):
+        self.assertEqual(fmt.money(1.2345), "$1.23")
+        self.assertEqual(fmt.money(0), "$0.00")
+        self.assertEqual(fmt.money(9.994), "$9.99")
+
+    def test_tens_keep_one_decimal(self):
+        self.assertEqual(fmt.money(12.34), "$12.3")
+
+    def test_hundreds_drop_the_decimals(self):
+        self.assertEqual(fmt.money(123.4), "$123")
+
+    def test_thousands_are_abbreviated(self):
+        self.assertEqual(fmt.money(1234.5), "$1.2k")
+
+    def test_an_unreadable_cost_has_no_label(self):
+        for raw in (None, "1.23", True, -1, float("nan")):
+            self.assertIsNone(fmt.money(raw), raw)
+
+
 if __name__ == "__main__":
     unittest.main()

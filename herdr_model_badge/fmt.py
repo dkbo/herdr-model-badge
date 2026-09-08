@@ -4,6 +4,7 @@ The agents sidebar is 18-36 columns wide, so everything here trims hard and
 returns ``None`` whenever a value is missing rather than inventing a placeholder.
 """
 
+import math
 import re
 
 #: Anthropic puts the family before the version in current ids and after it in the
@@ -92,6 +93,25 @@ def token_count(raw):
     if raw < 999_500:
         return "%dk" % round(raw / 1000)
     return "%.1fM" % (raw / 1_000_000)
+
+
+def money(raw):
+    """``1.2345`` -> ``$1.23``. Exact: the only source for this is a real total.
+
+    Precision gives way to width as the number grows, because a sidebar has room
+    for cents on a short session and not for cents on a long one.
+    """
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return None
+    if not math.isfinite(raw) or raw < 0:
+        return None
+    if raw < 10:
+        return "$%.2f" % raw
+    if raw < 100:
+        return "$%.1f" % raw
+    if raw < 1000:
+        return "$%d" % round(raw)
+    return "$%.1fk" % (raw / 1000)
 
 
 def badge(model, effort_label):

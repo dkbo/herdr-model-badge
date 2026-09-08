@@ -21,7 +21,7 @@ WINDOW_MINUTES = {"five_hour": 300, "seven_day": 10080}
 
 #: Values the statusline is authoritative for; everything else only fills a gap
 #: the transcript could not.
-AUTHORITATIVE = ("ctx", "usage", "usage_session", "usage_period")
+AUTHORITATIVE = ("ctx", "ctx_num", "usage", "usage_session", "usage_period")
 
 
 def _payload_dict(payload, *keys):
@@ -48,7 +48,12 @@ def values(payload, now=None):
 
     percentage = _payload_dict(payload, "context_window").get("used_percentage")
     if isinstance(percentage, (int, float)) and not isinstance(percentage, bool):
-        found["ctx"] = "%d%%" % max(0, round(percentage))
+        whole = max(0, round(percentage))
+        found["ctx"] = "%d%%" % whole
+        # The same number without its unit, for a sidebar rule to compare. It is
+        # absent whenever `$ctx` falls back to a count, because a threshold meant
+        # for a percentage would otherwise colour "84k" as though it were one.
+        found["ctx_num"] = "%d" % whole
 
     # display_name and effort.level only stand in when the transcript is unreadable.
     display = _payload_dict(payload, "model").get("display_name")
@@ -58,6 +63,13 @@ def values(payload, now=None):
     effort = fmt.effort(_payload_dict(payload, "effort").get("level"))
     if effort:
         found["effort"] = effort
+
+    # What this session has cost so far. Claude Code totals it in this payload and
+    # nowhere the transcript records, so there is no price table to keep and nothing
+    # to estimate. Unlike a window percentage it only grows, so it needs no expiry.
+    spend = fmt.money(_payload_dict(payload, "cost").get("total_cost_usd"))
+    if spend:
+        found["cost"] = spend
 
     limits = _payload_dict(payload, "rate_limits")
     windows = [
@@ -100,7 +112,7 @@ class Cache:
         slug = "".join(char if char.isalnum() else "_" for char in pane_id)
         return os.path.join(self.directory, "%s.json" % slug)
 
-    def read(self, pane_id, session_id):
+    def read(self, pane_id, session_id, now=None):
         try:
             with open(self._path(pane_id), encoding="utf-8") as handle:
                 entry = json.load(handle)
@@ -113,7 +125,11 @@ class Cache:
         if stored is not None and session_id is not None and stored != session_id:
             return {}
         stored_values = entry.get("values")
-        return stored_values if isinstance(stored_values, dict) else {}
+        if not isinstance(stored_values, dict):
+            return {}
+        # A cached reading dates itself, so usage that has since expired never
+        # reaches a later event to be reported again.
+        return usage.drop_stale(stored_values, now)
 
     def write(self, pane_id, session_id, values_):
         path = self._path(pane_id)

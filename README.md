@@ -2,7 +2,8 @@
 
 A [herdr](https://herdr.dev) plugin that answers what the agents sidebar does not
 tell you: **which model is each agent running, at what effort, how full is its
-context, and how close is the account to its rate limits?**
+context, what has the session cost, and how close is the account to its rate
+limits?**
 
 ```
   ○ panova              ○ panova
@@ -10,11 +11,13 @@ context, and how close is the account to its rate limits?**
                   ->        fable 5.1 · high · 21%
                             5h:6% · →02:10
                             wk:4% · →09-14
+                            $4.10
   ○ collect             ○ collect
       claude                claude
                             opus 5 · high · 6%
                             5h:6% · →02:10
                             wk:4% · →09-14
+                            $0.87
 ```
 
 Every agent already records this in its own session log or hands it to its
@@ -34,17 +37,39 @@ Then tell the sidebar where to put the values, in `~/.config/herdr/config.toml`:
 [ui.sidebar.agents.rows_by_agent]
 claude = [
   ["state_icon", "workspace", "tab"],
-  [{ token = "agent", dim = true }],
+  [{ token = "agent", fg = "#9399b2", dim = false }],
   [
-    { token = "$model", fg = "#cdd6f4", bold = true },
-    { token = "$effort", dim = true },
-    { token = "$ctx", fg = "#89b4fa" },
+    { token = "$model", fg = "#cdd6f4", bold = true, dim = false },
+    { token = "$effort", fg = "#bac2de", dim = false },
+    { token = "$ctx", fg = "#a6e3a1", dim = false },
   ],
-  [{ token = "$usage_session_pct", fg = "#a6e3a1" }, { token = "$usage_session_at", dim = true }],
-  [{ token = "$usage_period_pct", fg = "#a6e3a1" }, { token = "$usage_period_at", dim = true }],
+  [{ token = "$usage_session_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_session_at", fg = "#a6adc8", dim = false }],
+  [{ token = "$usage_period_pct", fg = "#a6e3a1", dim = false }, { token = "$usage_period_at", fg = "#a6adc8", dim = false }],
+  [{ token = "$cost", fg = "#5fe1d6", dim = false }],
 ]
 # codex takes the same rows; agy has no usage windows, so its rows stop at the model.
 ```
+
+To turn a number red as it climbs, style the unitless token instead — herdr 0.9.0+:
+
+```toml
+[
+  { token = "$usage_session_label", fg = "#a6adc8", dim = false },
+  { token = "$usage_session_num", fg = "#a6e3a1", dim = false, rules = [
+    { gt = 80, fg = "#ff6188", bold = true },
+    { gt = 70, fg = "#ffd75f" },
+  ] },
+  { token = "$usage_session_at", fg = "#a6adc8", dim = false },
+]
+```
+
+That row reads `5h · 87 · →17:20`: herdr's separator is not configurable, so a
+unitless number costs you the `%` and a `·`. herdr 0.8.x rejects the whole agent
+entry rather than ignoring `rules`, so keep the plain rows until you have 0.9.0.
+
+Every token above says `dim = false` on purpose. Leaving `dim` out keeps herdr's
+contextual style, which can pull a colour back down on a row that is not focused;
+an explicit `false` removes that modifier and lets the greys do the quietening.
 
 The full set, plus narrower and monochrome variants, is in
 [`config.example.toml`](config.example.toml).
@@ -59,14 +84,14 @@ Values appear as each agent next changes state, or immediately with
 Give each agent only the rows it can fill — a row whose tokens are all empty is
 still a row.
 
-Requires herdr 0.8.0+ and `python3` 3.8+ on `PATH`. No third-party packages.
+Requires herdr 0.8.2+ and `python3` 3.8+ on `PATH`. No third-party packages.
 
 ### One extra step for Claude Code
 
-Claude Code keeps its rate-limit windows and true context percentage out of the
-transcript entirely; the only place they appear is the JSON it hands its statusLine
-command. So `$usage*` and a percentage `$ctx` need the statusline wired through the
-plugin. **Codex needs none of this** — it records its own rate limits, and works
+Claude Code keeps its rate-limit windows, session cost and true context percentage
+out of the transcript entirely; the only place they appear is the JSON it hands its
+statusLine command. So `$usage*`, `$cost` and a percentage `$ctx` need the
+statusline wired through the plugin. **Codex needs none of this** — it records its own rate limits, and works
 straight after install.
 
 The plugin writes a launcher at a fixed path that survives plugin updates:
@@ -104,12 +129,18 @@ command still runs.
 | `$effort` | `high` | reasoning effort as the agent recorded it |
 | `$perm` | `auto` | permission / approval mode in force |
 | `$ctx` | `21%` | context used; falls back to a count (`147k`) when no percentage is available |
+| `$ctx_num` | `21` | the same percentage with no unit, for a threshold rule; empty when `$ctx` is a count |
+| `$cost` | `$1.23` | what this session has cost so far; Claude Code only |
 | `$usage_session` | `5h:6% (→02:10)` | the short rate-limit window (≤ 24h) |
 | `$usage_session_pct` | `5h:6%` | just the number, for a row that colours it |
 | `$usage_session_at` | `→02:10` | just the reset, for a row that keeps it quiet |
+| `$usage_session_label` | `5h` | just the window, for a row whose number is bare |
+| `$usage_session_num` | `6` | just the number, unitless, for a threshold rule |
 | `$usage_period` | `wk:4% (→09-14)` | the long rate-limit window (> 24h) |
 | `$usage_period_pct` | `wk:4%` | |
 | `$usage_period_at` | `→09-14` | |
+| `$usage_period_label` | `wk` | |
+| `$usage_period_num` | `4` | |
 | `$usage` | `5h:6%  wk:4%` | both windows on one narrow row, percentages only |
 
 ### Laying them out
@@ -119,10 +150,20 @@ not be baked into a value. It styles a token as a whole, which is why every
 composite value is also reported pre-split: spend one token on
 `5h:6% (→02:10)`, or two on a coloured percentage beside a dim reset time.
 
-That whole-token styling is static, so the plugin cannot turn a percentage red as
-it climbs. The statusline it wraps still does — this is a sidebar at 26 columns,
-not a status bar, and one calm colour per kind of number reads better there than
-four that change under you.
+herdr 0.9.0 added `rules`, which restyle a token by its own value — that is what
+turns a percentage red as it climbs. A rule matches the whole value, and a `gt`
+rule only matches a value that parses completely as a number, so `5h:87%` can never
+trip a threshold. Hence one more shape for the same reading: `$usage_session_label`
+and `$usage_session_num` are that percentage with the unit taken off, and
+`$ctx_num` is the context percentage alone. Pick the pretty form or the colourable
+one; the plugin reports both and never guesses which you meant.
+
+`$ctx_num` is absent whenever `$ctx` falls back to a count, because a threshold
+meant for a percentage would otherwise paint `84k` as though it were one.
+
+The default rows still spend one calm colour per kind of number: at 26 columns a
+sidebar is not a status bar, and a threshold is worth having for the one number
+that means stop.
 
 Window labels come from each provider's own window length, so a 5-hour, weekly or
 30-day plan all read correctly (`5h`, `wk`, `30d`) without the plugin knowing
@@ -138,13 +179,17 @@ longer exists.
 A token you cannot read is reported as empty rather than guessed, and a token that
 stops being readable is cleared rather than left showing a stale value.
 
+`$cost` is Claude's alone. Claude Code totals a session's spend in the statusLine
+payload, so the number is exact and needs no price table; Codex records how many
+tokens it used but never what they cost, and pricing them here would be a guess.
+
 ## Supported agents
 
-| agent | source | model | effort | `$perm` | `$ctx` | `$usage_*` |
-|---|---|---|---|---|---|---|
-| `claude` | transcript, plus the statusLine payload | ✅ | ✅ | ✅ | `21%` with statusline, else `147k` | statusline only |
-| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | ✅ | ✅ | ✅ | `17k` | ✅ built in |
-| `agy` | `~/.gemini/antigravity-cli/settings.json` | ✅ | ✅ | — | — | — |
+| agent | source | model | effort | `$perm` | `$ctx` | `$cost` | `$usage_*` |
+|---|---|---|---|---|---|---|---|
+| `claude` | transcript, plus the statusLine payload | ✅ | ✅ | ✅ | `21%` with statusline, else `147k` | statusline only | statusline only |
+| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | ✅ | ✅ | ✅ | `17k` | — | ✅ built in |
+| `agy` | `~/.gemini/antigravity-cli/settings.json` | ✅ | ✅ | — | — | — | — |
 
 Every other agent herdr recognises reports nothing, which leaves its row blank
 instead of wrong. Adding one is a module in `herdr_model_badge/providers/`: expose
@@ -174,6 +219,17 @@ piece in between:
    megabytes.
 5. **Reporting** compares against the tokens herdr just handed back, so a settled
    pane reports nothing at all — an event hook cannot feed itself.
+6. **Two sources.** Everything an agent owns — model, effort, permission mode,
+   context, cost — is reported under one source with no expiry, because only the
+   agent can change it. The rate-limit windows go out under a second source with a
+   `ttl_ms`, because they go wrong on their own: the window resets on a clock, and
+   the limits belong to the account, so another pane spending against them moves a
+   number this pane will never hear about. herdr drops that report when the ttl
+   runs out, which is the only way a value can disappear on a pane where nothing is
+   happening — there is no hook for "nothing happened". The ttl is the time left
+   until the soonest window reset, or 30 minutes, whichever comes first. The
+   cached statusline reading is dated with the same moment, so an expired reading
+   is not simply reported again by the next event.
 
 herdr documents startup hooks as one-shot initialization rather than supervised
 daemons, so there is no background process: every run does its work and exits. A
@@ -190,10 +246,12 @@ value actually changed.
   `claude-opus-5` in the transcript whether the session is the 200K or the 1M
   variant, so without the statusline the limit is not knowable and `$ctx` falls back
   to an absolute count. Codex is always a count.
-- **Claude usage stops updating when a pane goes quiet.** The percentages come from
-  the statusline, which only renders while Claude Code is running, so an idle pane
-  shows the last reading. The reset times stay correct because they are absolute,
-  and the segment disappears once its window rolls over.
+- **Claude usage lapses on a quiet pane rather than going stale.** The percentages
+  come from the statusline, which only renders while Claude Code is running, so an
+  idle pane has nothing confirming its last reading. Those rows therefore empty out
+  once the window resets or half an hour passes, whichever is sooner, and fill in
+  again on the pane's next turn. `$ctx` and `$cost` stay: context only moves when
+  the agent works, and a session's cost only grows.
 - **Resumed sessions rely on a fallback.** herdr learns a session id once, from the
   agent's `SessionStart` hook; a resume or compaction can leave that id pointing at
   nothing. When the id misses, the plugin takes the newest session log that records

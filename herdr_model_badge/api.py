@@ -87,11 +87,13 @@ class Client:
         # agent.get takes a resolvable target: a pane id or a live agent name.
         return self.call("agent.get", {"target": pane_id}).get("agent") or {}
 
-    def report(self, pane_id, source, tokens):
-        return self.call(
-            "pane.report_metadata",
-            {"pane_id": pane_id, "source": source, "tokens": tokens},
-        )
+    def report(self, pane_id, source, tokens, ttl_ms=None):
+        params = {"pane_id": pane_id, "source": source, "tokens": tokens}
+        if ttl_ms is not None:
+            # herdr drops the whole report when this runs out, which is how a value
+            # that goes wrong on its own disappears without a hook to notice.
+            params["ttl_ms"] = ttl_ms
+        return self.call("pane.report_metadata", params)
 
     def notify(self, title, body=None):
         params = {"title": title}

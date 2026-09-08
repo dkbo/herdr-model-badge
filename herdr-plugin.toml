@@ -1,11 +1,15 @@
 # herdr-plugin.toml — manifest for herdr-model-badge.
 #
 # The plugin answers what the agents sidebar cannot: which model each agent runs, at
-# what effort, how full its context is, and how close the account is to its rate
-# limits. It reads that from each agent's own session log — plus, for Claude Code,
+# what effort, how full its context is, what the session has cost, and how close the
+# account is to its rate limits. It reads that from each agent's own session log — plus, for Claude Code,
 # the statusLine payload that carries what the transcript never records — and
 # reports it back to herdr as pane metadata tokens, which the sidebar renders
-# through `$badge` / `$ctx` / `$usage*` (see config.example.toml).
+# through `$badge` / `$ctx` / `$cost` / `$usage*` (see config.example.toml).
+#
+# The usage tokens go out under a second source carrying a ttl, so herdr expires
+# them by itself once their window resets or the reading stops being confirmed. The
+# model beside them, which only an agent can change, is reported without one.
 #
 # Everything here is one-shot by design. herdr documents startup hooks as
 # initialization commands rather than supervised daemons, so there is no background
@@ -14,9 +18,11 @@
 
 id = "herdr-model-badge"
 name = "herdr-model-badge"
-version = "0.3.0"
-description = "Show each agent's model, effort, context use and rate-limit windows in the herdr agents sidebar."
-min_herdr_version = "0.8.0"
+version = "0.4.0"
+description = "Show each agent's model, effort, context use, spend and rate-limit windows in the herdr agents sidebar."
+# 0.8.2 is the version `ttl_ms` on pane.report_metadata was verified against, and
+# the usage tokens rely on it to expire on a pane that has gone quiet.
+min_herdr_version = "0.8.2"
 # Native Windows is untested and its agent home paths differ; WSL works as Linux.
 platforms = ["linux", "macos"]
 

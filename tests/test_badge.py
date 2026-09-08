@@ -2,18 +2,20 @@
 
 import unittest
 
-from herdr_model_badge import badge
+from herdr_model_badge import SOURCE, USAGE_SOURCE, badge, usage
 
-TOKEN_NAMES = ("badge", "model", "effort", "perm", "ctx", "usage",
+TOKEN_NAMES = ("badge", "model", "effort", "perm", "ctx", "ctx_num", "cost", "usage",
                "usage_session", "usage_session_pct", "usage_session_at",
-               "usage_period", "usage_period_pct", "usage_period_at")
+               "usage_session_label", "usage_session_num",
+               "usage_period", "usage_period_pct", "usage_period_at",
+               "usage_period_label", "usage_period_num")
 
 
 class NoCache:
     """Stands in for the statusline cache in tests that are not about it."""
 
     @staticmethod
-    def read(pane_id, session_id):
+    def read(pane_id, session_id, now=None):
         return {}
 
 
@@ -167,7 +169,15 @@ class StatuslineOverlayTests(unittest.TestCase):
         self.cache = statusline.Cache(self.tmp.name)
 
     def test_usage_seen_by_the_statusline_survives_into_a_later_event(self):
-        self.cache.write("w1:p1", "sess-1", {"ctx": "6%", "usage": "5h:6%  wk:4%"})
+        import time
+
+        # A cached reading carries the moment it stops counting, so a recent one
+        # still overlays the transcript on a later event.
+        self.cache.write("w1:p1", "sess-1", {
+            "ctx": "6%",
+            "usage": "5h:6%  wk:4%",
+            usage.EXPIRES_KEY: time.time() + 600,
+        })
         agent = {
             "pane_id": "w1:p1",
             "agent": "claude",
@@ -194,10 +204,73 @@ class StatuslineOverlayTests(unittest.TestCase):
         self.assertIsNone(got["usage"])
 
 
+class ReportsForTests(unittest.TestCase):
+    """One reading, two reports: what lasts and what a clock invalidates."""
+
+    WINDOW = {"minutes": 300, "percent": 6, "resets_at": None}
+
+    def reader(self):
+        values = {"model": "opus 5", "effort": "high", "ctx": "6%", "ctx_num": "6",
+                  "cost": "$1.23"}
+        values.update(usage.tokens([self.WINDOW]))
+        return fake_reader(values)
+
+    def reports(self):
+        agent = {"pane_id": "w1:p1", "agent": "claude"}
+        return badge.reports_for(agent, resolve=lambda kind: self.reader(), cache=NO_CACHE)
+
+    def test_the_number_a_rule_can_compare_travels_with_the_value_it_styles(self):
+        # ctx_num is durable for the same reason ctx is: only the agent moves it.
+        durable, ephemeral = self.reports()
+        self.assertIn("ctx_num", durable.tokens)
+        self.assertIn("usage_session_num", ephemeral.tokens)
+
+    def test_the_durable_values_go_out_without_a_ttl(self):
+        durable = self.reports()[0]
+        self.assertEqual(durable.source, SOURCE)
+        self.assertIsNone(durable.ttl_ms)
+        self.assertEqual(durable.tokens["badge"], "opus 5 · high")
+        self.assertEqual(durable.tokens["cost"], "$1.23")
+        self.assertEqual(durable.tokens["ctx"], "6%")
+        self.assertNotIn("usage", durable.tokens)
+
+    def test_the_usage_values_go_out_under_their_own_source_with_a_ttl(self):
+        ephemeral = self.reports()[1]
+        self.assertEqual(ephemeral.source, USAGE_SOURCE)
+        self.assertEqual(ephemeral.tokens["usage_session_pct"], "5h:6%")
+        self.assertEqual(ephemeral.tokens["usage_session_num"], "6")
+        self.assertEqual(ephemeral.tokens["usage_session_label"], "5h")
+        self.assertGreater(ephemeral.ttl_ms, 0)
+        self.assertNotIn("model", ephemeral.tokens)
+
+    def test_the_internal_expiry_is_never_reported_as_a_token(self):
+        for report in self.reports():
+            self.assertNotIn(usage.EXPIRES_KEY, report.tokens)
+
+    def test_an_agent_with_no_usage_asks_for_no_ttl(self):
+        agent = {"pane_id": "w1:p1", "agent": "claude"}
+        durable, ephemeral = badge.reports_for(
+            agent, resolve=lambda kind: fake_reader({"model": "opus 5"}), cache=NO_CACHE
+        )
+        self.assertIsNone(ephemeral.ttl_ms)
+        self.assertTrue(all(value is None for value in ephemeral.tokens.values()))
+
+    def test_between_them_the_reports_cover_every_token_exactly_once(self):
+        names = [name for report in self.reports() for name in report.tokens]
+        self.assertEqual(sorted(names), sorted(badge.TOKEN_NAMES))
+
+
 class TokenBudgetTests(unittest.TestCase):
-    def test_the_token_set_fits_what_one_report_can_carry(self):
-        # pane.report_metadata caps tokens at 16 per call.
-        self.assertLessEqual(len(badge.TOKEN_NAMES), 16)
+    def test_each_report_fits_what_one_call_can_carry(self):
+        # pane.report_metadata caps tokens at 16 per call. The two groups exceed
+        # that together, which is why nothing ever sends their union.
+        self.assertLessEqual(len(badge.DURABLE_TOKENS), 16)
+        self.assertLessEqual(len(badge.EPHEMERAL_TOKENS), 16)
+
+    def test_the_groups_do_not_overlap(self):
+        self.assertEqual(
+            set(badge.DURABLE_TOKENS) & set(badge.EPHEMERAL_TOKENS), set()
+        )
 
     def test_token_names_are_valid_herdr_identifiers(self):
         import re

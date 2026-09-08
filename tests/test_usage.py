@@ -163,5 +163,125 @@ class WindowsTests(unittest.TestCase):
         self.assertEqual(usage.tokens([{"minutes": 300}], now=NOW), {})
 
 
+class ExpiryTests(unittest.TestCase):
+    """When a reading stops being worth showing, and how herdr is told."""
+
+    WINDOWS = [
+        {"minutes": 300, "percent": 6, "resets_at": at("2026-09-08 04:29")},
+        {"minutes": 10080, "percent": 4, "resets_at": at("2026-09-13 23:59")},
+    ]
+
+    def test_a_reading_carries_the_moment_it_stops_meaning_anything(self):
+        values = usage.tokens(self.WINDOWS, NOW)
+        self.assertEqual(values[usage.EXPIRES_KEY], NOW + usage.MAX_STALE_SECONDS)
+
+    def test_a_window_resetting_sooner_than_the_drift_bound_wins(self):
+        # The percentage describes a window that will not exist in ten minutes.
+        soon = [{"minutes": 300, "percent": 6, "resets_at": NOW + 600}]
+        values = usage.tokens(soon, NOW)
+        self.assertEqual(values[usage.EXPIRES_KEY], NOW + 600)
+
+    def test_no_readable_window_carries_no_expiry(self):
+        self.assertNotIn(usage.EXPIRES_KEY, usage.tokens([], NOW))
+
+    def test_the_expiry_is_not_a_sidebar_token(self):
+        self.assertNotIn(usage.EXPIRES_KEY, usage.TOKEN_NAMES)
+
+    def test_the_ttl_is_the_time_left_before_that_moment(self):
+        values = usage.tokens(self.WINDOWS, NOW)
+        self.assertEqual(usage.ttl_ms(values, NOW + 300), (usage.MAX_STALE_SECONDS - 300) * 1000)
+
+    def test_values_with_no_usage_ask_for_no_ttl(self):
+        self.assertIsNone(usage.ttl_ms({"model": "opus 5"}, NOW))
+
+    def test_a_ttl_is_never_zero_or_negative(self):
+        values = usage.tokens(self.WINDOWS, NOW)
+        self.assertGreaterEqual(usage.ttl_ms(values, NOW + 99999), 1)
+
+    def test_the_ttl_stays_inside_what_herdr_accepts(self):
+        values = usage.tokens(self.WINDOWS, NOW)
+        self.assertLessEqual(usage.ttl_ms(values, NOW), 86_400_000)
+
+
+class DropStaleTests(unittest.TestCase):
+    """A cached reading the clock has invalidated must not be reported again."""
+
+    def fresh(self):
+        values = usage.tokens(
+            [{"minutes": 300, "percent": 6, "resets_at": at("2026-09-08 04:29")}], NOW
+        )
+        values.update({"model": "opus 5", "cost": "$1.23", "ctx": "6%"})
+        return values
+
+    def test_a_fresh_reading_is_left_alone(self):
+        values = self.fresh()
+        self.assertEqual(usage.drop_stale(values, NOW + 60), values)
+
+    def test_a_stale_reading_loses_only_its_usage(self):
+        got = usage.drop_stale(self.fresh(), NOW + usage.MAX_STALE_SECONDS + 1)
+        for name in usage.TOKEN_NAMES:
+            self.assertNotIn(name, got)
+        self.assertNotIn(usage.EXPIRES_KEY, got)
+        self.assertEqual(got["model"], "opus 5")
+        self.assertEqual(got["cost"], "$1.23")
+        self.assertEqual(got["ctx"], "6%")
+
+    def test_usage_cached_before_expiries_were_recorded_is_treated_as_stale(self):
+        # An entry written by an older version of the plugin: no way to date it.
+        got = usage.drop_stale({"usage": "5h:6%", "model": "opus 5"}, NOW)
+        self.assertNotIn("usage", got)
+        self.assertEqual(got["model"], "opus 5")
+
+    def test_values_holding_no_usage_are_untouched(self):
+        values = {"model": "opus 5", "cost": "$1.23"}
+        self.assertEqual(usage.drop_stale(values, NOW), values)
+
+
+class NumericTokenTests(unittest.TestCase):
+    """Bare numbers, because herdr's numeric rules only compare full numbers.
+
+    A percentage carrying its unit — `5h:6%` — never matches `gt = 80`, so the same
+    reading is reported a third way: the window label and the number apart.
+    """
+
+    WINDOWS = [
+        {"minutes": 300, "percent": 87.4, "resets_at": at("2026-09-08 04:29")},
+        {"minutes": 10080, "percent": 41, "resets_at": at("2026-09-13 23:59")},
+    ]
+
+    def test_the_label_and_the_number_are_reported_apart(self):
+        got = usage.tokens(self.WINDOWS, NOW)
+        self.assertEqual(got["usage_session_label"], "5h")
+        self.assertEqual(got["usage_session_num"], "87")
+        self.assertEqual(got["usage_period_label"], "wk")
+        self.assertEqual(got["usage_period_num"], "41")
+
+    def test_the_whole_and_split_forms_still_come_too(self):
+        got = usage.tokens(self.WINDOWS, NOW)
+        self.assertEqual(got["usage_session_pct"], "5h:87%")
+        self.assertEqual(got["usage_session"], "5h:87% (→04:29)")
+
+    def test_a_number_carries_nothing_a_numeric_rule_would_reject(self):
+        got = usage.tokens(self.WINDOWS, NOW)
+        for name in ("usage_session_num", "usage_period_num"):
+            self.assertRegex(got[name], r"^\d+$")
+            self.assertEqual(float(got[name]), int(got[name]))
+
+    def test_zero_is_still_a_number(self):
+        got = usage.tokens([{"minutes": 300, "percent": 0, "resets_at": None}], NOW)
+        self.assertEqual(got["usage_session_num"], "0")
+
+    def test_an_unreadable_window_reports_neither_half(self):
+        got = usage.tokens([{"minutes": 300, "percent": None, "resets_at": None}], NOW)
+        self.assertNotIn("usage_session_num", got)
+        self.assertNotIn("usage_session_label", got)
+
+    def test_they_expire_with_the_rest_of_the_reading(self):
+        values = usage.tokens(self.WINDOWS, NOW)
+        got = usage.drop_stale(values, NOW + usage.MAX_STALE_SECONDS + 1)
+        self.assertNotIn("usage_session_num", got)
+        self.assertNotIn("usage_session_label", got)
+
+
 if __name__ == "__main__":
     unittest.main()

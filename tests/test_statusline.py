@@ -20,6 +20,7 @@ PAYLOAD = {
     "model": {"display_name": "Opus 5"},
     "effort": {"level": "high"},
     "context_window": {"used_percentage": 6.4},
+    "cost": {"total_cost_usd": 1.2345},
     "rate_limits": {
         "five_hour": {"used_percentage": 6, "resets_at": at("2026-09-08 04:29")},
         "seven_day": {"used_percentage": 4, "resets_at": at("2026-09-13 23:59")},
@@ -59,6 +60,28 @@ class ValuesTests(unittest.TestCase):
         payload = json.loads(json.dumps(PAYLOAD))
         payload["context_window"] = {"used_percentage": None}
         self.assertNotIn("ctx", statusline.values(payload, now=NOW))
+
+    def test_the_context_percentage_is_also_reported_as_a_bare_number(self):
+        # `21%` never matches `gt = 80`; `21` does.
+        got = statusline.values(PAYLOAD, now=NOW)
+        self.assertEqual(got["ctx"], "6%")
+        self.assertEqual(got["ctx_num"], "6")
+
+    def test_no_percentage_means_no_number_rather_than_a_guess(self):
+        # Without the statusline `$ctx` is a count like `147k`; a threshold rule on
+        # a count would paint a number that is not a percentage at all.
+        payload = json.loads(json.dumps(PAYLOAD))
+        payload["context_window"] = {"used_percentage": None}
+        self.assertNotIn("ctx_num", statusline.values(payload, now=NOW))
+
+    def test_the_session_cost_comes_through(self):
+        # The transcript never totals it; this payload is the only place it exists.
+        self.assertEqual(statusline.values(PAYLOAD, now=NOW)["cost"], "$1.23")
+
+    def test_a_payload_without_a_cost_block_reports_none(self):
+        payload = json.loads(json.dumps(PAYLOAD))
+        payload.pop("cost")
+        self.assertNotIn("cost", statusline.values(payload, now=NOW))
 
     def test_junk_payloads_yield_nothing(self):
         for payload in ({}, None, [], "text"):
@@ -108,6 +131,22 @@ class CacheTests(unittest.TestCase):
             handle.write("x")
         cache.write("w1:p1", "sess-1", {"ctx": "6%"})
         self.assertEqual(cache.read("w1:p1", "sess-1"), {})
+
+    def test_a_reading_older_than_its_window_loses_only_its_usage(self):
+        from herdr_model_badge import usage
+
+        seen = statusline.values(PAYLOAD, now=NOW)
+        self.cache.write("w1:p1", "sess-1", seen)
+        got = self.cache.read("w1:p1", "sess-1", now=NOW + usage.MAX_STALE_SECONDS + 1)
+        self.assertEqual(got["ctx"], "6%")
+        self.assertEqual(got["cost"], "$1.23")
+        self.assertNotIn("usage", got)
+        self.assertNotIn("usage_session", got)
+
+    def test_a_reading_still_inside_its_window_reads_back_whole(self):
+        seen = statusline.values(PAYLOAD, now=NOW)
+        self.cache.write("w1:p1", "sess-1", seen)
+        self.assertEqual(self.cache.read("w1:p1", "sess-1", now=NOW + 60), seen)
 
     def test_writing_twice_replaces_rather_than_appends(self):
         self.cache.write("w1:p1", "sess-1", {"ctx": "6%"})

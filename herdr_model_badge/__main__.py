@@ -19,10 +19,19 @@ import os
 import subprocess
 import sys
 
-from . import SOURCE, __version__, badge, launcher, statusline
+from . import SOURCE, USAGE_SOURCE, __version__, badge, launcher, statusline, usage
 from .api import Client, HerdrError
 
+#: Every token we own, for comparing against what a pane is already showing.
 CLEARED = {name: None for name in badge.TOKEN_NAMES}
+
+#: What clearing actually sends. herdr scopes metadata per source, so an uninstall
+#: has to name each one — and it caps a report at 16 tokens, which the two groups
+#: only exceed together.
+CLEARED_BY_SOURCE = (
+    (SOURCE, {name: None for name in badge.DURABLE_TOKENS}),
+    (USAGE_SOURCE, {name: None for name in badge.EPHEMERAL_TOKENS}),
+)
 
 
 def log(message):
@@ -47,16 +56,31 @@ def event_pane_id(raw):
     return None
 
 
-def apply_to(client, agent):
-    """Report one agent's tokens, and return whether anything actually changed."""
+def clear_pane(client, pane_id):
+    """Drop every token we own on one pane, under each source that could hold it."""
+    for source, tokens in CLEARED_BY_SOURCE:
+        client.report(pane_id, source, tokens)
+
+
+def apply_to(client, agent, arm_usage=False):
+    """Report one agent's tokens, and return whether anything actually changed.
+
+    ``arm_usage`` re-sends the expiring report even when its values are unchanged.
+    herdr is counting down on those tokens, so a pane that keeps working without
+    moving its percentages still has to say so or the row would blink empty. It is
+    off on the statusline path, which renders many times a second.
+    """
     pane_id = agent.get("pane_id")
     if not pane_id:
         return False
-    tokens = badge.tokens_for(agent)
-    if not badge.needs_report(agent, tokens):
-        return False
-    client.report(pane_id, SOURCE, tokens)
-    return True
+    reported = False
+    for report in badge.reports_for(agent):
+        rearm = arm_usage and report.ttl_ms is not None
+        if not rearm and not badge.needs_report(agent, report.tokens):
+            continue
+        client.report(pane_id, report.source, report.tokens, report.ttl_ms)
+        reported = True
+    return reported
 
 
 def write_launcher():
@@ -78,7 +102,7 @@ def sweep(client):
     updated = 0
     for agent in client.agents():
         try:
-            if apply_to(client, agent):
+            if apply_to(client, agent, arm_usage=True):
                 updated += 1
         except HerdrError as exc:
             log("skipped %s: %s" % (agent.get("pane_id"), exc))
@@ -95,10 +119,10 @@ def event(client):
     except HerdrError:
         # The pane lost its agent (exited, or was released). Clear our tokens so the
         # sidebar does not keep showing the model of an agent that is gone.
-        client.report(pane_id, SOURCE, CLEARED)
+        clear_pane(client, pane_id)
         return 1
     agent.setdefault("pane_id", pane_id)
-    return 1 if apply_to(client, agent) else 0
+    return 1 if apply_to(client, agent, arm_usage=True) else 0
 
 
 def clear(client):
@@ -106,7 +130,7 @@ def clear(client):
     for agent in client.agents():
         pane_id = agent.get("pane_id")
         if pane_id and badge.needs_report(agent, CLEARED):
-            client.report(pane_id, SOURCE, CLEARED)
+            clear_pane(client, pane_id)
             cleared += 1
     return cleared
 
@@ -128,9 +152,12 @@ def statusline_mode(client, wrapped, stdin_text):
     session_id = statusline.session_id_of(payload)
     cache = statusline.Cache()
     seen = statusline.values(payload)
-    if seen == cache.read(pane_id, session_id):
-        return 0
+    previous = cache.read(pane_id, session_id)
+    # Rewritten on every render, unlike the report: a rendering statusline is the
+    # proof that the reading is current, and the entry is what carries that date.
     cache.write(pane_id, session_id, seen)
+    if usage.displayed(seen) == usage.displayed(previous):
+        return 0
 
     try:
         agent = client.agent(pane_id)

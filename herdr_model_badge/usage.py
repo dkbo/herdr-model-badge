@@ -16,9 +16,49 @@ SESSION_WINDOW_MINUTES = 1440
 #: Beyond this, a clock time is ambiguous, so the reset shows a date instead.
 CLOCK_HORIZON_SECONDS = 86400
 
+#: How long a reading may go unrefreshed before it is dropped rather than shown.
+#: These limits belong to the account, not the pane, so any other agent spending
+#: against them moves the number without this pane ever hearing about it.
+MAX_STALE_SECONDS = 1800
+
+#: The tokens this module produces. ``badge`` reports them under their own source
+#: precisely so herdr can drop this group alone when its expiry passes.
+#:
+#: Each window is reported three ways because herdr's sidebar rules cannot take a
+#: value apart: a ``gt = 80`` rule only matches a value that parses completely as a
+#: number, so "5h:87%" can never trip a threshold. The ``_label`` and ``_num`` pair
+#: is that same reading with the unit removed — the number a rule can compare, and
+#: the label it would otherwise have lost.
+TOKEN_NAMES = (
+    "usage",
+    "usage_session",
+    "usage_session_pct",
+    "usage_session_at",
+    "usage_session_label",
+    "usage_session_num",
+    "usage_period",
+    "usage_period_pct",
+    "usage_period_at",
+    "usage_period_label",
+    "usage_period_num",
+)
+
+#: Where a reading carries the moment it stops counting. Not one of TOKEN_NAMES, so
+#: it never reaches herdr; it rides along in the same values dict, which means the
+#: statusline cache dates its entries without needing a format of its own.
+EXPIRES_KEY = "_usage_expires_at"
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _now(now=None):
+    return now if now is not None else datetime.datetime.now().timestamp()
+
 
 def _minutes(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if not _number(value):
         return None
     minutes = int(value)
     return minutes if minutes > 0 else None
@@ -46,9 +86,9 @@ def classify(minutes):
 
 def reset_label(resets_at, now=None):
     """``→04:29`` for today, ``→09-13`` further out, nothing once it has passed."""
-    if isinstance(resets_at, bool) or not isinstance(resets_at, (int, float)):
+    if not _number(resets_at):
         return None
-    now = now if now is not None else datetime.datetime.now().timestamp()
+    now = _now(now)
     remaining = resets_at - now
     if remaining <= 0:
         # The window rolled over, so whatever percentage came with it is stale.
@@ -60,7 +100,7 @@ def reset_label(resets_at, now=None):
 
 
 def _percent(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if not _number(value):
         return None
     return max(0, round(value))
 
@@ -104,24 +144,77 @@ def tokens(windows, now=None):
     Where a provider reports several windows in one slot, the longest wins — that
     is the limit a user is further from and more likely to be surprised by.
     """
+    now = _now(now)
     best = {}
     for window in windows:
         minutes = _minutes(window.get("minutes"))
-        parts = segment(minutes, window.get("percent"), window.get("resets_at"), now)
+        resets_at = window.get("resets_at")
+        parts = segment(minutes, window.get("percent"), resets_at, now)
         if parts[0] is None:
             continue
         slot = classify(minutes)
         if slot not in best or minutes > best[slot][0]:
-            best[slot] = (minutes, parts)
+            best[slot] = (minutes, parts, resets_at, window.get("percent"))
 
     values = {}
-    for slot, (_, (pct, reset)) in best.items():
+    for slot, (minutes, (pct, reset), _resets_at, percent) in best.items():
         values["usage_%s" % slot] = joined((pct, reset))
         values["usage_%s_pct" % slot] = pct
         if reset:
             values["usage_%s_at" % slot] = reset
+        values["usage_%s_label" % slot] = window_label(minutes)
+        values["usage_%s_num" % slot] = "%d" % _percent(percent)
 
     combined = compact([best[slot][1][0] for slot in ("session", "period") if slot in best])
     if combined:
         values["usage"] = combined
+    if best:
+        values[EXPIRES_KEY] = _expires_at(best.values(), now)
     return values
+
+
+def _expires_at(readings, now):
+    """The earlier of the two clocks that can invalidate a reading.
+
+    A window's own reset is exact: past it, the percentage describes a window that
+    no longer exists. The drift bound covers the rest, because a reading only stays
+    true for as long as nothing else spends the same account's limits.
+    """
+    moments = [now + MAX_STALE_SECONDS]
+    moments.extend(resets_at for _, _, resets_at, _pct in readings if _number(resets_at))
+    return min(moments)
+
+
+def ttl_ms(values, now=None):
+    """How long herdr should hold these usage tokens before dropping them itself.
+
+    Without this the badge on a pane nobody is using would keep asserting a
+    percentage from whenever that pane last ran, which is the one number here that
+    goes wrong on its own.
+    """
+    expires_at = values.get(EXPIRES_KEY)
+    if not _number(expires_at):
+        return None
+    return max(1, int((expires_at - _now(now)) * 1000))
+
+
+def drop_stale(values, now=None):
+    """``values`` without the usage a clock has invalidated.
+
+    Reported tokens expire in herdr on their own, but a cached reading would hand
+    the same expired numbers straight back on the next event, with a fresh ttl. A
+    reading carrying usage but no expiry predates this bookkeeping: there is no way
+    to date it, so it counts as stale.
+    """
+    if not any(name in values for name in TOKEN_NAMES):
+        return values
+    expires_at = values.get(EXPIRES_KEY)
+    if _number(expires_at) and expires_at > _now(now):
+        return values
+    stale = set(TOKEN_NAMES) | {EXPIRES_KEY}
+    return {name: value for name, value in values.items() if name not in stale}
+
+
+def displayed(values):
+    """``values`` without the bookkeeping, for comparing one reading with another."""
+    return {name: value for name, value in values.items() if name != EXPIRES_KEY}

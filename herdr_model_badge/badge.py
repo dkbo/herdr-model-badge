@@ -1,26 +1,35 @@
-"""Turn one herdr AgentInfo into the token set reported back for its pane."""
+"""Turn one herdr AgentInfo into the reports we send back for its pane."""
 
-from . import fmt, providers, statusline
+import collections
 
-#: Every token we own. All of them go on every report so that a value which stops
-#: being readable clears instead of lingering as a stale badge.
-#: herdr accepts at most 16 tokens per report, and styles each one as a whole, so
-#: the composite values are reported alongside their parts: a row can spend one
-#: token on "5h:6% (→04:29)" or two on a coloured percentage and a quiet reset.
-TOKEN_NAMES = (
+from . import SOURCE, USAGE_SOURCE, fmt, providers, statusline, usage
+
+#: The tokens that only an agent can change. Every one of them goes on every report
+#: so that a value which stops being readable clears instead of lingering as a stale
+#: badge. herdr styles a token as a whole, which is why the composite values are
+#: reported alongside their parts: a row can spend one token on "5h:6% (→04:29)" or
+#: two on a coloured percentage and a quiet reset.
+DURABLE_TOKENS = (
     "badge",
     "model",
     "effort",
     "perm",
     "ctx",
-    "usage",
-    "usage_session",
-    "usage_session_pct",
-    "usage_session_at",
-    "usage_period",
-    "usage_period_pct",
-    "usage_period_at",
+    "ctx_num",
+    "cost",
 )
+
+#: The tokens a clock can invalidate without the agent doing anything. They travel
+#: under their own source with a ttl, so herdr drops them on a pane that has gone
+#: quiet instead of leaving a percentage that nothing is confirming any more.
+EPHEMERAL_TOKENS = usage.TOKEN_NAMES
+
+#: Everything we own, which is what an uninstall has to clear. herdr accepts at most
+#: 16 tokens per report; each group is well inside that on its own.
+TOKEN_NAMES = DURABLE_TOKENS + EPHEMERAL_TOKENS
+
+#: One ``pane.report_metadata`` call: what to say, and how long it stays true.
+Report = collections.namedtuple("Report", "source tokens ttl_ms")
 
 
 def session_of(agent):
@@ -52,8 +61,8 @@ def merge(base, overlay):
     return merged
 
 
-def tokens_for(agent, resolve=providers.for_agent, cache=None, now=None):
-    """Build ``{token: value}`` for one agent, with ``None`` meaning "clear it"."""
+def values_for(agent, resolve=providers.for_agent, cache=None, now=None):
+    """Everything readable about one agent: its own log, plus what a statusline saw."""
     session = session_of(agent)
     read = resolve(agent.get("agent"))
     values = {}
@@ -68,11 +77,29 @@ def tokens_for(agent, resolve=providers.for_agent, cache=None, now=None):
     pane_id = session.get("pane_id")
     if pane_id:
         cache = cache if cache is not None else statusline.Cache()
-        values = merge(values, cache.read(pane_id, session.get("session_id")))
+        values = merge(values, cache.read(pane_id, session.get("session_id"), now))
+    return values
 
-    tokens = {name: values.get(name) for name in TOKEN_NAMES}
-    tokens["badge"] = fmt.badge(values.get("model"), values.get("effort"))
+
+def _tokens(values, names):
+    tokens = {name: values.get(name) for name in names}
+    if "badge" in tokens:
+        tokens["badge"] = fmt.badge(values.get("model"), values.get("effort"))
     return tokens
+
+
+def tokens_for(agent, resolve=providers.for_agent, cache=None, now=None):
+    """Build ``{token: value}`` for one agent, with ``None`` meaning "clear it"."""
+    return _tokens(values_for(agent, resolve, cache, now), TOKEN_NAMES)
+
+
+def reports_for(agent, resolve=providers.for_agent, cache=None, now=None):
+    """One reading, split into the report that lasts and the one that expires."""
+    values = values_for(agent, resolve, cache, now)
+    return (
+        Report(SOURCE, _tokens(values, DURABLE_TOKENS), None),
+        Report(USAGE_SOURCE, _tokens(values, EPHEMERAL_TOKENS), usage.ttl_ms(values, now)),
+    )
 
 
 def needs_report(agent, tokens):

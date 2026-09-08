@@ -1,22 +1,27 @@
 """The four modes, driven against a fake herdr client."""
 
+import collections
 import io
 import json
 import os
 import tempfile
+import time
 import unittest
 
+from herdr_model_badge import SOURCE, USAGE_SOURCE
 from herdr_model_badge import __main__ as cli
 from herdr_model_badge.api import HerdrError
 
 
-class IsolatedState(unittest.TestCase):
-    """Point the plugin's caches and agent homes at temporary directories.
+Report = collections.namedtuple("Report", "pane_id source tokens ttl_ms")
 
-    The statusline cache is keyed by pane id, so a test naming a pane that the
-    developer's own machine happens to have cached would read that real entry back
-    and fail only on that machine. The agent homes are redirected for the same
-    reason: a provider should not find a real transcript under test.
+
+class IsolatedState(unittest.TestCase):
+    """Point the statusline cache at a temporary directory.
+
+    The cache is keyed by pane id, so a test naming a pane that the developer's own
+    machine happens to have cached would read that real entry back and fail only on
+    that machine.
     """
 
     def setUp(self):
@@ -61,9 +66,12 @@ class FakeClient:
                 return dict(agent)
         raise HerdrError("agent.get", {"code": "pane_not_found"})
 
-    def report(self, pane_id, source, tokens):
-        self.reports.append((pane_id, source, tokens))
+    def report(self, pane_id, source, tokens, ttl_ms=None):
+        self.reports.append(Report(pane_id, source, tokens, ttl_ms))
         return {}
+
+    def reports_from(self, source):
+        return [report for report in self.reports if report.source == source]
 
     def notify(self, title, body=None):
         self.notifications.append((title, body))
@@ -97,10 +105,10 @@ class SweepTests(IsolatedState):
     def test_a_stale_badge_on_an_unreadable_agent_is_cleared(self):
         client = FakeClient([STALE_PANE])
         self.assertEqual(cli.sweep(client), 1)
-        pane_id, source, tokens = client.reports[0]
-        self.assertEqual(pane_id, "w2:p1")
-        self.assertEqual(source, "herdr-model-badge")
-        self.assertTrue(all(value is None for value in tokens.values()))
+        report = client.reports[0]
+        self.assertEqual(report.pane_id, "w2:p1")
+        self.assertEqual(report.source, "herdr-model-badge")
+        self.assertTrue(all(value is None for value in report.tokens.values()))
 
     def test_an_agent_already_showing_the_right_tokens_is_left_alone(self):
         client = FakeClient([FRESH_PANE, dict(STALE_PANE, tokens={})])
@@ -109,10 +117,10 @@ class SweepTests(IsolatedState):
 
     def test_one_failing_pane_does_not_abort_the_sweep(self):
         class Flaky(FakeClient):
-            def report(self, pane_id, source, tokens):
+            def report(self, pane_id, source, tokens, ttl_ms=None):
                 if pane_id == "w1:p1":
                     raise HerdrError("pane.report_metadata", {"code": "pane_not_found"})
-                return super().report(pane_id, source, tokens)
+                return super().report(pane_id, source, tokens, ttl_ms)
 
         client = Flaky([dict(STALE_PANE, pane_id="w1:p1"), STALE_PANE])
         self.assertEqual(cli.sweep(client), 1)
@@ -144,9 +152,9 @@ class EventTests(IsolatedState):
     def test_a_pane_that_lost_its_agent_gets_its_tokens_cleared(self):
         client = FakeClient([], failing_panes=["w9:p1"])
         self.assertEqual(self.run_event(client, '{"data":{"pane_id":"w9:p1"}}'), 1)
-        pane_id, _, tokens = client.reports[0]
-        self.assertEqual(pane_id, "w9:p1")
-        self.assertTrue(all(value is None for value in tokens.values()))
+        self.assertEqual(client.reports[0].pane_id, "w9:p1")
+        for report in client.reports:
+            self.assertTrue(all(value is None for value in report.tokens.values()))
 
     def test_an_event_without_a_pane_id_does_nothing(self):
         client = FakeClient([STALE_PANE])
@@ -154,11 +162,102 @@ class EventTests(IsolatedState):
         self.assertEqual(client.reports, [])
 
 
+class TwoSourceTests(IsolatedState):
+    """Usage goes out under its own source so herdr can expire it on its own."""
+
+    PANE = {
+        "pane_id": "w1:p1",
+        "agent": "claude",
+        "agent_session": {"kind": "id", "value": "sess-1"},
+    }
+    PAYLOAD = json.dumps(
+        {
+            "session_id": "sess-1",
+            "context_window": {"used_percentage": 6},
+            "cost": {"total_cost_usd": 1.2345},
+            "rate_limits": {
+                "five_hour": {"used_percentage": 6, "resets_at": time.time() + 3600},
+            },
+        }
+    )
+
+    def seed_statusline(self):
+        """Give the pane a reading only the statusline could have seen."""
+        from herdr_model_badge import statusline
+
+        payload = json.loads(self.PAYLOAD)
+        cache = statusline.Cache(self.tmp.name)
+        cache.write("w1:p1", "sess-1", statusline.values(payload))
+        return statusline.values(payload)
+
+    def test_each_source_carries_its_own_half_of_the_reading(self):
+        self.seed_statusline()
+        client = FakeClient([self.PANE])
+        self.assertEqual(cli.sweep(client), 1)
+
+        durable = client.reports_from(SOURCE)[0]
+        self.assertEqual(durable.tokens["ctx"], "6%")
+        self.assertEqual(durable.tokens["cost"], "$1.23")
+        self.assertIsNone(durable.ttl_ms)
+
+        ephemeral = client.reports_from(USAGE_SOURCE)[0]
+        self.assertEqual(ephemeral.tokens["usage_session_pct"], "5h:6%")
+        self.assertGreater(ephemeral.ttl_ms, 0)
+        self.assertLessEqual(ephemeral.ttl_ms, 86_400_000)
+
+    def test_a_pane_with_nothing_to_expire_is_sent_no_usage_report(self):
+        client = FakeClient([dict(self.PANE, tokens={"model": "opus 5"})])
+        cli.sweep(client)
+        self.assertEqual(client.reports_from(USAGE_SOURCE), [])
+
+    def test_an_unchanged_usage_reading_is_still_resent_to_rearm_its_ttl(self):
+        # herdr drops the tokens when the ttl runs out, so a pane that keeps working
+        # without moving the needle must keep saying so or the row would blink empty.
+        seen = self.seed_statusline()
+        settled = dict(self.PANE, tokens=dict(seen))
+        settled["tokens"]["badge"] = None
+        client = FakeClient([settled])
+        cli.apply_to(client, settled, arm_usage=True)
+        self.assertEqual(len(client.reports_from(USAGE_SOURCE)), 1)
+
+    def test_the_statusline_path_does_not_rearm_on_every_render(self):
+        seen = self.seed_statusline()
+        settled = dict(self.PANE, tokens=dict(seen))
+        settled["tokens"]["badge"] = None
+        client = FakeClient([settled])
+        cli.apply_to(client, settled)
+        self.assertEqual(client.reports_from(USAGE_SOURCE), [])
+
+
 class ClearTests(IsolatedState):
     def test_panes_holding_our_tokens_are_cleared(self):
         client = FakeClient([STALE_PANE])
         self.assertEqual(cli.clear(client), 1)
         self.assertTrue(all(value is None for value in client.reports[0][2].values()))
+
+    def test_no_cleared_report_exceeds_what_herdr_accepts(self):
+        client = FakeClient([dict(STALE_PANE, tokens={"model": "opus 5", "usage": "5h:6%"})])
+        cli.clear(client)
+        for report in client.reports:
+            self.assertLessEqual(len(report.tokens), 16)
+            self.assertTrue(all(value is None for value in report.tokens.values()))
+
+    def test_clearing_names_exactly_the_tokens_its_source_reports(self):
+        from herdr_model_badge import badge
+
+        client = FakeClient([dict(STALE_PANE, tokens={"model": "opus 5", "usage": "5h:6%"})])
+        cli.clear(client)
+        sent = {report.source: sorted(report.tokens) for report in client.reports}
+        self.assertEqual(sent[SOURCE], sorted(badge.DURABLE_TOKENS))
+        self.assertEqual(sent[USAGE_SOURCE], sorted(badge.EPHEMERAL_TOKENS))
+
+    def test_both_sources_are_cleared(self):
+        client = FakeClient([dict(STALE_PANE, tokens={"model": "opus 5", "usage": "5h:6%"})])
+        self.assertEqual(cli.clear(client), 1)
+        self.assertEqual(
+            sorted(report.source for report in client.reports),
+            sorted([SOURCE, USAGE_SOURCE]),
+        )
 
     def test_panes_with_nothing_of_ours_are_left_alone(self):
         client = FakeClient([dict(STALE_PANE, tokens={"jj_status": "dirty"})])
