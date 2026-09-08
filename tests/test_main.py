@@ -3,10 +3,41 @@
 import io
 import json
 import os
+import tempfile
 import unittest
 
 from herdr_model_badge import __main__ as cli
 from herdr_model_badge.api import HerdrError
+
+
+class IsolatedState(unittest.TestCase):
+    """Point the plugin's caches and agent homes at temporary directories.
+
+    The statusline cache is keyed by pane id, so a test naming a pane that the
+    developer's own machine happens to have cached would read that real entry back
+    and fail only on that machine. The agent homes are redirected for the same
+    reason: a provider should not find a real transcript under test.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        homes = {
+            "HERDR_PLUGIN_STATE_DIR": self.tmp.name,
+            "CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "claude"),
+            "CODEX_HOME": os.path.join(self.tmp.name, "codex"),
+        }
+        previous = {name: os.environ.get(name) for name in homes}
+        os.environ.update(homes)
+
+        def restore():
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+        self.addCleanup(restore)
 
 
 class FakeClient:
@@ -62,7 +93,7 @@ class EventPaneIdTests(unittest.TestCase):
             self.assertIsNone(cli.event_pane_id(raw), raw)
 
 
-class SweepTests(unittest.TestCase):
+class SweepTests(IsolatedState):
     def test_a_stale_badge_on_an_unreadable_agent_is_cleared(self):
         client = FakeClient([STALE_PANE])
         self.assertEqual(cli.sweep(client), 1)
@@ -88,7 +119,7 @@ class SweepTests(unittest.TestCase):
         self.assertEqual([report[0] for report in client.reports], ["w2:p1"])
 
 
-class EventTests(unittest.TestCase):
+class EventTests(IsolatedState):
     def run_event(self, client, raw):
         import os
 
@@ -123,7 +154,7 @@ class EventTests(unittest.TestCase):
         self.assertEqual(client.reports, [])
 
 
-class ClearTests(unittest.TestCase):
+class ClearTests(IsolatedState):
     def test_panes_holding_our_tokens_are_cleared(self):
         client = FakeClient([STALE_PANE])
         self.assertEqual(cli.clear(client), 1)
