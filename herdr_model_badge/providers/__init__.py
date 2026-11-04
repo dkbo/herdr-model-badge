@@ -1,8 +1,8 @@
 """Provider registry, keyed by the canonical agent kind herdr reports."""
 
-from . import agy, claude, codex
+from . import agy, claude, codex, pi
 
-MODULES = (claude, codex, agy)
+MODULES = (claude, codex, agy, pi)
 
 _BY_AGENT = {
     agent: module.read for module in MODULES for agent in module.AGENTS

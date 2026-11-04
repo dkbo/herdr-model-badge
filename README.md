@@ -193,13 +193,21 @@ tokens it used but never what they cost, and pricing them here would be a guess.
 | `claude` | transcript, plus the statusLine payload | ✅ | ✅ | ✅ | `21%` with statusline, else `147k` | statusline only | statusline only |
 | `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | ✅ | ✅ | ✅ | `17k` | — | ✅ built in |
 | `agy` | `~/.gemini/antigravity-cli/settings.json` | ✅ | ✅ | — | — | — | — |
+| `pi` | reported session JSONL path, or exact session id under `~/.pi/agent/sessions/` | ✅ | ✅ | — | — | — | — |
 
 Every other agent herdr recognises reports nothing, which leaves its row blank
 instead of wrong. Adding one is a module in `herdr_model_badge/providers/`: expose
 `AGENTS` and a `read(session, home=None)` that returns display-ready values, and
 call `usage.tokens()` if that agent records rate-limit windows.
 
-`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured if you have moved those homes.
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `PI_CODING_AGENT_DIR` are honoured if you have moved those homes.
+
+Pi needs only its existing Herdr integration and a `$model` / `$effort` or `$badge`
+row in the sidebar. It reads model and thinking-level changes, plus model and
+thinking metadata on assistant messages, following parent links from the latest
+persisted entry so abandoned branches do not supply settings. A reported session
+path takes priority; an exact session id is the only fallback, avoiding guesses
+between Pi panes sharing a working directory. No additional Pi extension is needed.
 
 ## How it works
 
@@ -217,9 +225,9 @@ piece in between:
    exists for the instant the statusline renders, while the event hooks run at
    unrelated moments, so what it saw is cached per pane — otherwise every later hook
    would clear usage tokens it has no other way to learn.
-4. **Reading** opens only the last 256 KB of the session log and walks it backwards
-   to the newest relevant record, so cost stays flat as a session grows into
-   megabytes.
+4. **Reading** normally opens only the last 256 KB of the session log and walks it
+   backwards to the newest relevant record. Pi can retry with a bounded 4 MB tail
+   for older sessions whose thinking level is only recorded near the start.
 5. **Reporting** compares against the tokens herdr just handed back, so a settled
    pane reports nothing at all — an event hook cannot feed itself.
 6. **Two sources.** Everything an agent owns — model, effort, permission mode,
@@ -242,6 +250,12 @@ value actually changed.
 
 ## Known limits
 
+- **Pi shows persisted settings, refreshed on agent events.** Switching a model or
+  thinking level while idle may need the refresh action or the next turn before
+  the badge updates. A `/tree` navigation that appends nothing is invisible until
+  another entry is written. Settings beyond the 4 MB read limit are omitted rather
+  than borrowed from another branch. For virtual/routed models, an assistant
+  record names the physical model that answered, not necessarily the selection.
 - **Antigravity is global, not per-pane.** Antigravity CLI stores conversations as
   protobuf/SQLite blobs with no documented model field, so the plugin reads the
   CLI's current selection. Two `agy` panes therefore always show the same value.
